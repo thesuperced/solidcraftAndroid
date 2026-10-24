@@ -15,6 +15,8 @@ pub struct Keypad {
     key_rects: std::collections::BTreeMap<String, egui::Rect>,
     #[serde(skip)]
     captured_key: Option<String>,
+    #[serde(skip)]
+    capture_origin: egui::Pos2,
 }
 
 impl Keypad {
@@ -86,6 +88,7 @@ impl Keypad {
                 let hit = self.key_rects.iter().find(|(_, rect)| rect.contains(pos)).map(|(label, _)| label.clone());
                 if let Some(label) = hit {
                     self.captured_key = Some(label);
+                    self.capture_origin = pos;
                     if let Some(owner) = self.owner {
                         ctx.memory_mut(|m| m.request_focus(owner));
                     }
@@ -96,7 +99,9 @@ impl Keypad {
                 // The floating window can shift by a few points as egui settles its size between
                 // frames. The press established the intended key, so complete that captured tap
                 // on release instead of re-hit-testing against a newly laid-out rectangle.
-                self.activate(&label);
+                if pos.distance(self.capture_origin) <= ctx.options(|o| o.input_options.max_click_dist).max(8.0) {
+                    self.activate(&label);
+                }
                 if let Some(owner) = self.owner {
                     ctx.memory_mut(|m| m.request_focus(owner));
                 }
@@ -137,9 +142,19 @@ impl Keypad {
             return;
         }
         let mut clicked = false;
+        let screen = ctx.content_rect();
+        let field = self.owner.and_then(|id| ctx.read_response(id)).map(|r| r.rect);
+        let width = 260.0;
+        let height = if self.abc { 380.0 } else { 280.0 };
+        let field = field.unwrap_or_else(|| egui::Rect::from_center_size(screen.center(), egui::vec2(72.0, 24.0)));
+        let x = if field.right() + width + 12.0 < screen.right() { field.right() + 8.0 } else { field.left() - width - 8.0 };
+        let position = egui::pos2(
+            x.clamp(screen.left(), (screen.right() - width).max(screen.left())),
+            field.top().clamp(screen.top(), (screen.bottom() - height).max(screen.top())),
+        );
         egui::Window::new("Value input")
             .id(egui::Id::new("android_value_keypad"))
-            .anchor(egui::Align2::RIGHT_CENTER, [-16.0, 0.0])
+            .fixed_pos(position)
             .resizable(false)
             .collapsible(false)
             .title_bar(false)
@@ -269,6 +284,55 @@ mod tests {
         output.textures_delta.clear();
         assert_eq!(value, "-12.");
         assert_eq!(ctx.memory(|m| m.focused()), Some(field));
+    }
+    #[test]
+    fn popup_keeps_focus_through_digits_backspace_and_confirm() {
+        let ctx = egui::Context::default();
+        let mut pad = Keypad::default();
+        let id = egui::Id::new("inline-value");
+        let mut text = String::new();
+        let mut closed = false;
+        let mut committed = false;
+        let mut frame = |pad: &mut Keypad, events: Vec<egui::Event>, focus: bool| {
+            let mut raw = egui::RawInput {
+                focused: true,
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 900.0))),
+                events,
+                ..Default::default()
+            };
+            pad.intercept_pointer(&ctx, &mut raw);
+            pad.restore_focus(&ctx);
+            pad.input(&mut raw, Default::default());
+            let mut output = ctx.run_ui(raw, |ui| {
+                pad.show(ui);
+                let r = ui.add(egui::TextEdit::singleline(&mut text).id(id));
+                if focus {
+                    r.request_focus();
+                }
+                if r.lost_focus() {
+                    closed = true;
+                    committed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                }
+            });
+            output.textures_delta.clear();
+        };
+        frame(&mut pad, Vec::new(), true);
+        frame(&mut pad, Vec::new(), false);
+        for label in ["1", "2", "Backspace", "3", "Enter"] {
+            let pos = pad.key_rects.get(label).unwrap().center();
+            for pressed in [true, false] {
+                frame(
+                    &mut pad,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() },
+                    ],
+                    false,
+                );
+            }
+        }
+        assert_eq!(text, "13");
+        assert!(closed && committed);
     }
     #[test]
     fn settings_never_persist_modifiers_or_input() {

@@ -217,7 +217,7 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
             p["translate"] = num(at - from);
         }
     }
-    if d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false) {
+    if d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false) || crate::tablet_input::action(crate::tablet_input::COPY) {
         p["copy"] = json!(true);
     }
     Ok(p)
