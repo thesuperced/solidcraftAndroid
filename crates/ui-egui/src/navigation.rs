@@ -285,6 +285,47 @@ pub(crate) fn camera_motion(app: &mut SolveApp, rect: Rect, mut params: serde_js
     app.cam.fov = stored_fov;
 }
 
+/// Apply source-separated tablet gestures through the shared camera command path.
+pub fn tablet_exclusions(app: &SolveApp) -> Vec<Rect> {
+    let mut rects = crate::shell::covered_rects(app);
+    if let Some(rect) = app.viewport.rect {
+        rects.push(axis_rect(app, rect));
+    }
+    rects
+}
+
+/// Apply source-separated tablet gestures through the shared camera command path.
+pub fn tablet_motion(app: &mut SolveApp, mut delta: [f32; 2], pan: bool, zoom: f32, anchor: Option<[f32; 2]>) {
+    let Some(rect) = app.viewport.rect else { return };
+    if delta.iter().any(|n| !n.is_finite()) || !zoom.is_finite() {
+        return;
+    }
+    let sketch = app.session.active_sketch.is_some();
+    if pan || sketch {
+        delta[0] *= crate::prefs::pan_sign_x(app);
+    }
+    let mut motion = json!({"motion": if pan || sketch { "pan" } else { "orbit" }, "delta": delta});
+    if !pan && !sketch {
+        let pivot = match app.preferences.orbit_around {
+            OrbitAround::ViewCentre => None,
+            OrbitAround::Origin => Some(Vec3::ZERO),
+            OrbitAround::Cursor => anchor.map(|[x, y]| pivot_under(app, &projection(app, rect), egui::pos2(x, y))),
+        };
+        if let Some(pivot) = pivot {
+            motion["pivot"] = json!(pivot);
+        }
+    }
+    camera_motion(app, rect, motion);
+    if (zoom - 1.0).abs() > 0.0001 {
+        let pivot = anchor.map(|[x, y]| pivot_under(app, &projection(app, rect), egui::pos2(x, y)));
+        let mut params = json!({"motion":"zoom", "factor": f64::from(zoom).powf(crate::prefs::zoom_sign(app)).clamp(0.5, 2.0)});
+        if let Some(pivot) = pivot {
+            params["anchor"] = json!(pivot);
+        }
+        camera_motion(app, rect, params);
+    }
+}
+
 /// What one frame of camera input saw and did, for the caller's hover, selection and drawing.
 pub(crate) struct CameraInput {
     pub hover: Option<Pos2>,
@@ -319,9 +360,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         (
             // A finger lifting ends the pointer in the same frame (egui-winit sends
             // `PointerGone`), so a tap's click has no hover: it happened where the finger was.
-            i.pointer
-                .hover_pos()
-                .or_else(|| i.pointer.any_released().then(|| i.pointer.interact_pos()).flatten()),
+            i.pointer.hover_pos().or_else(|| i.pointer.any_released().then(|| i.pointer.interact_pos()).flatten()),
             i.smooth_scroll_delta.y,
             i.modifiers,
             i.pointer.middle_down(),
@@ -372,7 +411,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         i.events
             .iter()
             .filter_map(|e| match e {
-                egui::Event::Touch { id, phase, pos, .. } => Some((*id, *phase, *pos)),
+                egui::Event::Touch { id, phase, pos, .. } if !cfg!(target_os = "android") => Some((*id, *phase, *pos)),
                 _ => None,
             })
             .collect()
@@ -421,9 +460,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     if seen_touch {
         app.viewport.touch_seen_at = now;
     }
-    if !app.viewport.touch.is_empty()
-        && (now - app.viewport.touch_seen_at > TOUCH_STALE || (!seen_touch && !ui.input(|i| i.pointer.any_down())))
-    {
+    if !app.viewport.touch.is_empty() && (now - app.viewport.touch_seen_at > TOUCH_STALE || (!seen_touch && !ui.input(|i| i.pointer.any_down()))) {
         app.viewport.touch.clear();
         app.viewport.touch_landing = None;
         app.viewport.touch_span = None;
@@ -448,7 +485,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         log::debug!("touch event id={id:?} phase={phase:?} pos=({:.1},{:.1})", pos.x, pos.y);
     }
     // Pinch: egui's multi-touch state when it has one, otherwise the fingers' spread directly.
-    let (zoom, anchor_at, fingers) = match ui.input(|i| i.multi_touch()) {
+    let (zoom, anchor_at, fingers) = match ui.input(|i| if cfg!(target_os = "android") { None } else { i.multi_touch() }) {
         Some(m) => (f64::from(m.zoom_delta), Some(m.center_pos), m.num_touches),
         None => {
             let span = if two_fingers {
@@ -466,11 +503,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         }
     };
     if !app.viewport.touch.is_empty() {
-        let span = if app.viewport.touch.len() >= 2 {
-            (app.viewport.touch[1].1 - app.viewport.touch[0].1).length()
-        } else {
-            0.0
-        };
+        let span = if app.viewport.touch.len() >= 2 { (app.viewport.touch[1].1 - app.viewport.touch[0].1).length() } else { 0.0 };
         log::debug!(
             "touch: fingers={fingers} list={} zoom={zoom:.3} span={span:.0} stored={:.0}",
             app.viewport.touch.len(),
@@ -487,12 +520,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         // percent per frame — amplify it, or a pinch reads as no zoom at all.
         let step = (1.0 / zoom).powf(PINCH_GAIN).clamp(0.5, 2.0);
         app.cam.zoom_at(step, Some(anchor));
-        log::debug!(
-            "pinch applied: zoom={zoom:.4} step={step:.4} dist={:.2} yaw={:.3} pitch={:.3}",
-            app.cam.distance,
-            app.cam.yaw,
-            app.cam.pitch
-        );
+        log::debug!("pinch applied: zoom={zoom:.4} step={step:.4} dist={:.2} yaw={:.3} pitch={:.3}", app.cam.distance, app.cam.yaw, app.cam.pitch);
     }
     // Body-free wheel/drag navigation is meaningless under two fingers: the fingers own the view.
     let touch_nav = if two_fingers {
@@ -674,14 +702,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                 None => app.viewport.nav.is_some(),
             };
         orbit_drag(app, rect, f64::from(delta.x), f64::from(delta.y), press, snap, true);
-        if app.viewport.touch.len() > 0 {
-            log::debug!(
-                "orbit by touch: delta=({:.1},{:.1}) yaw={:.3} pitch={:.3}",
-                delta.x,
-                delta.y,
-                app.cam.yaw,
-                app.cam.pitch
-            );
+        if !app.viewport.touch.is_empty() {
+            log::debug!("orbit by touch: delta=({:.1},{:.1}) yaw={:.3} pitch={:.3}", delta.x, delta.y, app.cam.yaw, app.cam.pitch);
         }
     } else {
         if matches!(mode, Some(NavMode::Pan | NavMode::Zoom)) {

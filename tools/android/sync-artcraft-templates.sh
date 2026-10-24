@@ -56,6 +56,7 @@ git -C "$ART_DIR" show "$NEW:templates/android/ime_bridge.rs"    > "$APP_DIR/src
 git -C "$ART_DIR" show "$NEW:templates/android/system_fonts.rs"  > "$APP_DIR/src/system_fonts.rs"
 git -C "$ART_DIR" show "$NEW:templates/android/SafActivity.java" \
   | sed -e "s/__PACKAGE__/$PKG/g" -e "s/__CLASS__/$CLASS/g" -e "s/__TAG__/$TAG/g" \
+      -e 's/imeView.setSoundEffectsEnabled(false);/imeView.setSoundEffectsEnabled(false); imeView.setShowSoftInputOnFocus(false);/' \
   > "$APP_DIR/java/${PKG//.//}/$CLASS.java"
 echo "Wrote saf_bridge.rs, ime_bridge.rs, system_fonts.rs and $CLASS.java."
 echo "$NEW" > "$PIN"

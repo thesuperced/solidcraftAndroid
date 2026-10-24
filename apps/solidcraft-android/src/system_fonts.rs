@@ -67,11 +67,7 @@ const SYSTEM_SCRIPTS: &[SystemScript] = &[
     SystemScript {
         key: "artcraft-emoji",
         probe: '😀',
-        candidates: &[
-            ("NotoColorEmoji.ttf", 0),
-            ("NotoColorEmojiCompat.ttf", 0),
-            ("NotoColorEmojiLegacy.ttf", 0),
-        ],
+        candidates: &[("NotoColorEmoji.ttf", 0), ("NotoColorEmojiCompat.ttf", 0), ("NotoColorEmojiLegacy.ttf", 0)],
     },
     SystemScript {
         key: "artcraft-arabic",
@@ -86,158 +82,46 @@ const SYSTEM_SCRIPTS: &[SystemScript] = &[
     SystemScript {
         key: "artcraft-hebrew",
         probe: 'א',
-        candidates: &[
-            ("NotoSansHebrew-Regular.ttf", 0),
-            ("NotoSansHebrewUI-Regular.ttf", 0),
-            ("DroidSansHebrew-Regular.ttf", 0),
-        ],
+        candidates: &[("NotoSansHebrew-Regular.ttf", 0), ("NotoSansHebrewUI-Regular.ttf", 0), ("DroidSansHebrew-Regular.ttf", 0)],
     },
     SystemScript {
         key: "artcraft-devanagari",
         probe: 'क',
-        candidates: &[
-            ("NotoSansDevanagari-Regular.ttf", 0),
-            ("NotoSansDevanagariUI-Regular.ttf", 0),
-            ("DroidSansDevanagari-Regular.ttf", 0),
-        ],
+        candidates: &[("NotoSansDevanagari-Regular.ttf", 0), ("NotoSansDevanagariUI-Regular.ttf", 0), ("DroidSansDevanagari-Regular.ttf", 0)],
     },
-    SystemScript {
-        key: "artcraft-bengali",
-        probe: 'ক',
-        candidates: &[
-            ("NotoSansBengali-Regular.ttf", 0),
-            ("NotoSansBengaliUI-Regular.ttf", 0),
-        ],
-    },
-    SystemScript {
-        key: "artcraft-tamil",
-        probe: 'க',
-        candidates: &[
-            ("NotoSansTamil-Regular.ttf", 0),
-            ("NotoSansTamilUI-Regular.ttf", 0),
-        ],
-    },
-    SystemScript {
-        key: "artcraft-telugu",
-        probe: 'క',
-        candidates: &[
-            ("NotoSansTelugu-Regular.ttf", 0),
-            ("NotoSansTeluguUI-Regular.ttf", 0),
-        ],
-    },
-    SystemScript {
-        key: "artcraft-kannada",
-        probe: 'ಕ',
-        candidates: &[
-            ("NotoSansKannada-Regular.ttf", 0),
-            ("NotoSansKannadaUI-Regular.ttf", 0),
-        ],
-    },
+    SystemScript { key: "artcraft-bengali", probe: 'ক', candidates: &[("NotoSansBengali-Regular.ttf", 0), ("NotoSansBengaliUI-Regular.ttf", 0)] },
+    SystemScript { key: "artcraft-tamil", probe: 'க', candidates: &[("NotoSansTamil-Regular.ttf", 0), ("NotoSansTamilUI-Regular.ttf", 0)] },
+    SystemScript { key: "artcraft-telugu", probe: 'క', candidates: &[("NotoSansTelugu-Regular.ttf", 0), ("NotoSansTeluguUI-Regular.ttf", 0)] },
+    SystemScript { key: "artcraft-kannada", probe: 'ಕ', candidates: &[("NotoSansKannada-Regular.ttf", 0), ("NotoSansKannadaUI-Regular.ttf", 0)] },
     SystemScript {
         key: "artcraft-malayalam",
         probe: 'ക',
-        candidates: &[
-            ("NotoSansMalayalam-Regular.ttf", 0),
-            ("NotoSansMalayalamUI-Regular.ttf", 0),
-        ],
+        candidates: &[("NotoSansMalayalam-Regular.ttf", 0), ("NotoSansMalayalamUI-Regular.ttf", 0)],
     },
     SystemScript {
-        key: "artcraft-gujarati",
-        probe: 'ક',
-        candidates: &[
-            ("NotoSansGujarati-Regular.ttf", 0),
-            ("NotoSansGujaratiUI-Regular.ttf", 0),
-        ],
+        key: "artcraft-gujarati", probe: 'ક', candidates: &[("NotoSansGujarati-Regular.ttf", 0), ("NotoSansGujaratiUI-Regular.ttf", 0)]
     },
     SystemScript {
-        key: "artcraft-gurmukhi",
-        probe: 'ਕ',
-        candidates: &[
-            ("NotoSansGurmukhi-Regular.ttf", 0),
-            ("NotoSansGurmukhiUI-Regular.ttf", 0),
-        ],
+        key: "artcraft-gurmukhi", probe: 'ਕ', candidates: &[("NotoSansGurmukhi-Regular.ttf", 0), ("NotoSansGurmukhiUI-Regular.ttf", 0)]
     },
-    SystemScript {
-        key: "artcraft-oriya",
-        probe: 'କ',
-        candidates: &[
-            ("NotoSansOriya-Regular.ttf", 0),
-            ("NotoSansOriyaUI-Regular.ttf", 0),
-        ],
-    },
-    SystemScript {
-        key: "artcraft-sinhala",
-        probe: 'ක',
-        candidates: &[
-            ("NotoSansSinhala-Regular.ttf", 0),
-            ("NotoSansSinhalaUI-Regular.ttf", 0),
-        ],
-    },
+    SystemScript { key: "artcraft-oriya", probe: 'କ', candidates: &[("NotoSansOriya-Regular.ttf", 0), ("NotoSansOriyaUI-Regular.ttf", 0)] },
+    SystemScript { key: "artcraft-sinhala", probe: 'ක', candidates: &[("NotoSansSinhala-Regular.ttf", 0), ("NotoSansSinhalaUI-Regular.ttf", 0)] },
     SystemScript {
         key: "artcraft-thai",
         probe: 'ก',
-        candidates: &[
-            ("NotoSansThai-Regular.ttf", 0),
-            ("NotoSansThaiUI-Regular.ttf", 0),
-            ("DroidSansThai.ttf", 0),
-        ],
+        candidates: &[("NotoSansThai-Regular.ttf", 0), ("NotoSansThaiUI-Regular.ttf", 0), ("DroidSansThai.ttf", 0)],
+    },
+    SystemScript { key: "artcraft-lao", probe: 'ກ', candidates: &[("NotoSansLao-Regular.ttf", 0), ("NotoSansLaoUI-Regular.ttf", 0)] },
+    SystemScript { key: "artcraft-khmer", probe: 'ក', candidates: &[("NotoSansKhmer-Regular.ttf", 0), ("NotoSansKhmerUI-Regular.ttf", 0)] },
+    SystemScript { key: "artcraft-myanmar", probe: 'က', candidates: &[("NotoSansMyanmar-Regular.ttf", 0), ("NotoSansMyanmarUI-Regular.ttf", 0)] },
+    SystemScript {
+        key: "artcraft-ethiopic", probe: 'ሀ', candidates: &[("NotoSansEthiopic-Regular.ttf", 0), ("NotoSansEthiopicUI-Regular.ttf", 0)]
     },
     SystemScript {
-        key: "artcraft-lao",
-        probe: 'ກ',
-        candidates: &[
-            ("NotoSansLao-Regular.ttf", 0),
-            ("NotoSansLaoUI-Regular.ttf", 0),
-        ],
+        key: "artcraft-georgian", probe: 'ა', candidates: &[("NotoSansGeorgian-Regular.ttf", 0), ("NotoSansGeorgianUI-Regular.ttf", 0)]
     },
-    SystemScript {
-        key: "artcraft-khmer",
-        probe: 'ក',
-        candidates: &[
-            ("NotoSansKhmer-Regular.ttf", 0),
-            ("NotoSansKhmerUI-Regular.ttf", 0),
-        ],
-    },
-    SystemScript {
-        key: "artcraft-myanmar",
-        probe: 'က',
-        candidates: &[
-            ("NotoSansMyanmar-Regular.ttf", 0),
-            ("NotoSansMyanmarUI-Regular.ttf", 0),
-        ],
-    },
-    SystemScript {
-        key: "artcraft-ethiopic",
-        probe: 'ሀ',
-        candidates: &[
-            ("NotoSansEthiopic-Regular.ttf", 0),
-            ("NotoSansEthiopicUI-Regular.ttf", 0),
-        ],
-    },
-    SystemScript {
-        key: "artcraft-georgian",
-        probe: 'ა',
-        candidates: &[
-            ("NotoSansGeorgian-Regular.ttf", 0),
-            ("NotoSansGeorgianUI-Regular.ttf", 0),
-        ],
-    },
-    SystemScript {
-        key: "artcraft-armenian",
-        probe: 'Ա',
-        candidates: &[
-            ("NotoSansArmenian-Regular.ttf", 0),
-            ("NotoSansArmenianUI-Regular.ttf", 0),
-        ],
-    },
-    SystemScript {
-        key: "artcraft-symbols",
-        probe: '✓',
-        candidates: &[
-            ("NotoSansSymbols-Regular.ttf", 0),
-            ("NotoSansSymbols2-Regular.ttf", 0),
-        ],
-    },
+    SystemScript { key: "artcraft-armenian", probe: 'Ա', candidates: &[("NotoSansArmenian-Regular.ttf", 0), ("NotoSansArmenianUI-Regular.ttf", 0)] },
+    SystemScript { key: "artcraft-symbols", probe: '✓', candidates: &[("NotoSansSymbols-Regular.ttf", 0), ("NotoSansSymbols2-Regular.ttf", 0)] },
 ];
 
 /// Install any missing system fallbacks into the active font families.
@@ -249,10 +133,7 @@ pub fn install_system_fonts(ctx: &egui::Context) {
     // Which of our faces the active definitions already carry.
     let installed: Vec<bool> = ctx.fonts(|view| {
         let data = &view.definitions().font_data;
-        SYSTEM_SCRIPTS
-            .iter()
-            .map(|script| data.contains_key(script.key))
-            .collect()
+        SYSTEM_SCRIPTS.iter().map(|script| data.contains_key(script.key)).collect()
     });
     if installed.iter().all(|present| *present) {
         return;
@@ -267,11 +148,8 @@ pub fn install_system_fonts(ctx: &egui::Context) {
     let family_count = families.len();
     // The probe has to be drawn from a family that is actually bound, or epaint panics; prefer the
     // default UI family but fall back to whatever the app does define.
-    let probe_family = families
-        .iter()
-        .find(|family| matches!(family, egui::FontFamily::Proportional))
-        .cloned()
-        .unwrap_or_else(|| families[0].clone());
+    let probe_family =
+        families.iter().find(|family| matches!(family, egui::FontFamily::Proportional)).cloned().unwrap_or_else(|| families[0].clone());
     let font_id = egui::FontId::new(14.0, probe_family);
     for (script, present) in SYSTEM_SCRIPTS.iter().zip(&installed) {
         if *present {
@@ -286,17 +164,10 @@ pub fn install_system_fonts(ctx: &egui::Context) {
         let inserts = families
             .iter()
             .cloned()
-            .map(|family| egui::epaint::text::InsertFontFamily {
-                family,
-                priority: egui::epaint::text::FontPriority::Lowest,
-            })
+            .map(|family| egui::epaint::text::InsertFontFamily { family, priority: egui::epaint::text::FontPriority::Lowest })
             .collect();
         ctx.add_font(egui::epaint::text::FontInsert::new(script.key, data, inserts));
-        log::info!(
-            "Android: installed system fallback font {} (U+{:04X}) into {family_count} families",
-            script.key,
-            script.probe as u32
-        );
+        log::info!("Android: installed system fallback font {} (U+{:04X}) into {family_count} families", script.key, script.probe as u32);
     }
 }
 
@@ -304,10 +175,7 @@ pub fn install_system_fonts(ctx: &egui::Context) {
 /// ships no usable file for it).
 fn script_font(script: &'static SystemScript) -> Option<egui::FontData> {
     static READ: OnceLock<Mutex<HashMap<&'static str, Option<egui::FontData>>>> = OnceLock::new();
-    let mut read = READ
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut read = READ.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(cached) = read.get(script.key) {
         return cached.clone();
     }
@@ -334,10 +202,7 @@ fn script_font(script: &'static SystemScript) -> Option<egui::FontData> {
 /// collection) and kept for the life of the process.
 fn file_bytes(path: &Path) -> Option<&'static [u8]> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, Option<&'static [u8]>>>> = OnceLock::new();
-    let mut cache = CACHE
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut cache = CACHE.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(cached) = cache.get(path) {
         return *cached;
     }
@@ -362,10 +227,7 @@ fn file_bytes(path: &Path) -> Option<&'static [u8]> {
 
 /// Where a system font file lives, if the device ships it.
 fn font_path(name: &str) -> Option<PathBuf> {
-    FONT_DIRS
-        .iter()
-        .map(|dir| Path::new(dir).join(name))
-        .find(|path| path.is_file())
+    FONT_DIRS.iter().map(|dir| Path::new(dir).join(name)).find(|path| path.is_file())
 }
 
 /// Whether `bytes` starts like a font epaint can parse. `Context::add_font` panics on data it cannot
@@ -384,11 +246,7 @@ fn looks_like_font(bytes: &[u8]) -> bool {
 /// `.ttc`).
 fn font_face_count(bytes: &[u8]) -> u32 {
     if bytes.starts_with(b"ttcf") {
-        bytes
-            .get(8..12)
-            .and_then(|count| <[u8; 4]>::try_from(count).ok())
-            .map(u32::from_be_bytes)
-            .unwrap_or(1)
+        bytes.get(8..12).and_then(|count| <[u8; 4]>::try_from(count).ok()).map(u32::from_be_bytes).unwrap_or(1)
     } else {
         1
     }
@@ -408,11 +266,7 @@ pub fn install_font_env(app: &android_activity::AndroidApp) {
     let _ = std::fs::create_dir_all(home.join(".local/share"));
 
     #[cfg(unix)]
-    for link in [
-        home.join(".fonts"),
-        home.join(".local/share/fonts"),
-        base.join("fonts"),
-    ] {
+    for link in [home.join(".fonts"), home.join(".local/share/fonts"), base.join("fonts")] {
         if let Some(parent) = link.parent() {
             let _ = std::fs::create_dir_all(parent);
         }

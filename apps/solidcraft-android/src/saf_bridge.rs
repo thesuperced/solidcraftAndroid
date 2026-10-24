@@ -67,17 +67,11 @@ pub mod saf {
         pub fn new(app: &AndroidApp) -> Self {
             // SAFETY: AndroidApp owns the live VM pointer for the lifetime of the activity.
             let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr() as *mut _) };
-            Self {
-                app: app.clone(),
-                vm: Arc::new(vm),
-            }
+            Self { app: app.clone(), vm: Arc::new(vm) }
         }
 
         pub fn clone_ref(&self) -> Self {
-            Self {
-                app: self.app.clone(),
-                vm: Arc::clone(&self.vm),
-            }
+            Self { app: self.app.clone(), vm: Arc::clone(&self.vm) }
         }
 
         /// Ask the Activity (once, remembered) for broad device file access, so the app's own file
@@ -89,12 +83,7 @@ pub mod saf {
                 let activity_raw = self.app.activity_as_ptr() as jni::sys::jobject;
                 // SAFETY: AndroidApp retains this global Activity reference.
                 let activity = unsafe { env.as_cast_raw::<JObject>(&activity_raw)? };
-                env.call_method(
-                    &*activity,
-                    jni_str!("safRequestStoragePermission"),
-                    jni_sig!("()V"),
-                    &[],
-                )?;
+                env.call_method(&*activity, jni_str!("safRequestStoragePermission"), jni_sig!("()V"), &[])?;
                 Ok(())
             });
             if let Err(error) = result {
@@ -110,12 +99,7 @@ pub mod saf {
                     // SAFETY: AndroidApp retains this global Activity reference; as_cast_raw borrows it
                     // without taking ownership or attempting to delete the reference.
                     let activity = unsafe { env.as_cast_raw::<JObject>(&activity_raw)? };
-                    env.call_method(
-                        &*activity,
-                        jni_str!("safRequestOpen"),
-                        jni_sig!("(JZ)V"),
-                        &[JValue::Long(id as i64), JValue::Bool(multiple)],
-                    )?;
+                    env.call_method(&*activity, jni_str!("safRequestOpen"), jni_sig!("(JZ)V"), &[JValue::Long(id as i64), JValue::Bool(multiple)])?;
                     Ok(())
                 })
                 .map_err(|e| e.to_string())
@@ -160,9 +144,7 @@ pub mod saf {
                     // SAFETY: AndroidApp retains this global Activity reference; as_cast_raw borrows it
                     // without taking ownership or attempting to delete the reference.
                     let activity = unsafe { env.as_cast_raw::<JObject>(&activity_raw)? };
-                    let value = env
-                        .call_method(&*activity, jni_str!("safPoll"), jni_sig!("()Ljava/lang/String;"), &[])?
-                        .l()?;
+                    let value = env.call_method(&*activity, jni_str!("safPoll"), jni_sig!("()Ljava/lang/String;"), &[])?.l()?;
                     if value.is_null() {
                         return Ok(None);
                     }
@@ -184,12 +166,7 @@ pub mod saf {
                     // SAFETY: AndroidApp retains this global Activity reference; as_cast_raw borrows it
                     // without taking ownership or attempting to delete the reference.
                     let activity = unsafe { env.as_cast_raw::<JObject>(&activity_raw)? };
-                    let value = match env.call_method(
-                        &*activity,
-                        jni_str!("intentPoll"),
-                        jni_sig!("()Ljava/lang/String;"),
-                        &[],
-                    ) {
+                    let value = match env.call_method(&*activity, jni_str!("intentPoll"), jni_sig!("()Ljava/lang/String;"), &[]) {
                         Ok(value) => value.l()?,
                         Err(error) => {
                             // A missing `intentPoll` leaves a pending NoSuchMethodError on the shared
@@ -215,9 +192,7 @@ pub mod saf {
                     // SAFETY: AndroidApp retains this global Activity reference; as_cast_raw borrows it
                     // without taking ownership or attempting to delete the reference.
                     let activity = unsafe { env.as_cast_raw::<JObject>(&activity_raw)? };
-                    let value = env
-                        .call_method(&*activity, jni_str!("safFilesDir"), jni_sig!("()Ljava/lang/String;"), &[])?
-                        .l()?;
+                    let value = env.call_method(&*activity, jni_str!("safFilesDir"), jni_sig!("()Ljava/lang/String;"), &[])?.l()?;
                     let value = JString::cast_local(env, value)?;
                     let value: String = value.try_to_string(env)?;
                     Ok(PathBuf::from(value))
@@ -309,11 +284,7 @@ pub mod saf {
                     return match value.get("status").and_then(serde_json::Value::as_str).unwrap_or("error") {
                         "ok" => Ok(PickAnswer::Paths(picker_paths(&value))),
                         "cancel" => Ok(PickAnswer::Cancelled),
-                        _ => Err(value
-                            .get("message")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("the Android file picker failed")
-                            .to_owned()),
+                        _ => Err(value.get("message").and_then(serde_json::Value::as_str).unwrap_or("the Android file picker failed").to_owned()),
                     };
                 }
                 if Instant::now() >= deadline {
@@ -357,10 +328,7 @@ pub mod saf {
 
     /// The file name (without directory) of a staged path, for the app's display.
     pub fn picker_name(path: &str) -> String {
-        std::path::Path::new(path)
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "imported-file".to_owned())
+        std::path::Path::new(path).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| "imported-file".to_owned())
     }
 
     /// Mirrors a private file the app writes itself to a chosen SAF destination: tracks the file
@@ -376,10 +344,7 @@ pub mod saf {
         /// Watch `path` (a staged save destination) for writes.
         pub fn track(&self, id: u64, path: &str) {
             let (mtime, size) = file_stamp(path);
-            self.entries
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .insert(id, (path.to_owned(), mtime, size));
+            self.entries.lock().unwrap_or_else(|error| error.into_inner()).insert(id, (path.to_owned(), mtime, size));
         }
 
         /// Commit every tracked file whose contents changed since the last sync.

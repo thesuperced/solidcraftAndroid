@@ -36,12 +36,7 @@ pub mod ime {
         pub fn new(app: &AndroidApp) -> Self {
             // SAFETY: AndroidApp owns the live VM pointer for the lifetime of the activity.
             let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr() as *mut _) };
-            Self {
-                app: app.clone(),
-                vm: Arc::new(vm),
-                unsupported: false,
-                delivered: String::new(),
-            }
+            Self { app: app.clone(), vm: Arc::new(vm), unsupported: false, delivered: String::new() }
         }
 
         /// Forget what egui was told. Called when the focused field changes (or the keyboard is
@@ -86,12 +81,7 @@ pub mod ime {
                     // caller to handle, and this thread is shared with the SAF bridge, so clear it
                     // before reporting the missing method (otherwise the next unrelated JNI call sees
                     // a stale pending exception).
-                    let value = match env.call_method(
-                        &*activity,
-                        jni_str!("imePoll"),
-                        jni_sig!("()Ljava/lang/String;"),
-                        &[],
-                    ) {
+                    let value = match env.call_method(&*activity, jni_str!("imePoll"), jni_sig!("()Ljava/lang/String;"), &[]) {
                         Ok(value) => value.l()?,
                         Err(error) => {
                             env.exception_clear();
@@ -112,22 +102,12 @@ pub mod ime {
     /// A synthetic Enter press. Both the IME's action key (`a`) and its Enter/newline key (a bare
     /// newline in the buffer) become this, so egui decides what Enter means for the focused field.
     fn enter_key() -> egui::Event {
-        egui::Event::Key {
-            key: egui::Key::Enter,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::default(),
-        }
+        egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::default() }
     }
 
     /// Byte length of the prefix two strings share.
     fn common_prefix(a: &str, b: &str) -> usize {
-        a.chars()
-            .zip(b.chars())
-            .take_while(|(x, y)| x == y)
-            .map(|(c, _)| c.len_utf8())
-            .sum()
+        a.chars().zip(b.chars()).take_while(|(x, y)| x == y).map(|(c, _)| c.len_utf8()).sum()
     }
 
     /// Decode one queued event. The first character tags it and the rest is the payload:
@@ -164,22 +144,14 @@ pub mod ime {
                 let removed = old[prefix..].chars().count();
                 let mut events = Vec::new();
                 if removed > 0 {
-                    events.push(egui::Event::Ime(egui::ImeEvent::DeleteSurrounding {
-                        before_chars: removed,
-                        after_chars: 0,
-                    }));
+                    events.push(egui::Event::Ime(egui::ImeEvent::DeleteSurrounding { before_chars: removed, after_chars: 0 }));
                 }
                 let added = &payload[prefix..];
                 if !added.is_empty() {
                     events.push(egui::Event::Ime(egui::ImeEvent::Commit(added.to_owned())));
                 }
                 *delivered = payload.to_owned();
-                log::debug!(
-                    "ime: buffer {} chars, {} committed, {} deleted",
-                    delivered.chars().count(),
-                    added.chars().count(),
-                    removed
-                );
+                log::debug!("ime: buffer {} chars, {} committed, {} deleted", delivered.chars().count(), added.chars().count(), removed);
                 events
             }
             // An editor action (Done/Go/Search/Send) confirms the field. IME_ACTION_NONE (0)
@@ -213,10 +185,7 @@ pub mod ime {
                 for _ in 0..before_chars {
                     delivered.pop();
                 }
-                vec![egui::Event::Ime(egui::ImeEvent::DeleteSurrounding {
-                    before_chars,
-                    after_chars,
-                })]
+                vec![egui::Event::Ime(egui::ImeEvent::DeleteSurrounding { before_chars, after_chars })]
             }
             _ => Vec::new(),
         }
@@ -264,23 +233,14 @@ pub mod ime {
             let mut delivered = "qwe".to_owned();
             let events = translate("rque", &mut delivered);
             assert_eq!(committed(&events), "que");
-            assert!(matches!(
-                events[0],
-                egui::Event::Ime(egui::ImeEvent::DeleteSurrounding {
-                    before_chars: 3,
-                    after_chars: 0
-                })
-            ));
+            assert!(matches!(events[0], egui::Event::Ime(egui::ImeEvent::DeleteSurrounding { before_chars: 3, after_chars: 0 })));
         }
 
         #[test]
         fn a_newline_is_enter_and_clears_the_buffer() {
             let mut delivered = "sketch".to_owned();
             let events = translate("rsketch\n", &mut delivered);
-            assert!(matches!(
-                events.as_slice(),
-                [egui::Event::Key { key: egui::Key::Enter, .. }]
-            ));
+            assert!(matches!(events.as_slice(), [egui::Event::Key { key: egui::Key::Enter, .. }]));
             assert!(delivered.is_empty());
         }
 

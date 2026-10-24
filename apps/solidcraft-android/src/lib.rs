@@ -11,7 +11,9 @@
 //! Desktop-only host services (native dialogs, updater, SpaceMouse) stay absent.
 
 mod agent;
+mod finger_gestures;
 mod ime_bridge;
+mod keypad;
 mod saf_bridge;
 
 use saf_bridge::saf;
@@ -25,6 +27,7 @@ use solidcraft_engine::Session;
 use solidcraft_ui_egui::{Services, SolveApp};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use winit::platform::android::cad;
 
 const ANDROID_SHELL_MARKER: &str = "SOLIDCRAFT_ANDROID_SHELL_V6_IME_SNAPSHOT";
 
@@ -223,9 +226,7 @@ fn apply_env_overrides(dir: &std::path::Path) {
         }
     }
     let external = std::path::Path::new("/sdcard/Android/data/ai.storyteller.solidcraft/files");
-    let text = std::fs::read_to_string(dir.join("env.txt"))
-        .or_else(|_| std::fs::read_to_string(external.join("env.txt")))
-        .ok();
+    let text = std::fs::read_to_string(dir.join("env.txt")).or_else(|_| std::fs::read_to_string(external.join("env.txt"))).ok();
     let Some(text) = text else { return };
     for line in text.lines() {
         let line = line.trim();
@@ -246,6 +247,9 @@ fn apply_env_overrides(dir: &std::path::Path) {
 // ---------------------------------------------------------------- shell
 
 struct Shell {
+    input_trace: String,
+    keypad: keypad::Keypad,
+    gestures: finger_gestures::Gestures,
     solve: SolveApp,
     app: AndroidApp,
     bridge: saf::Bridge,
@@ -260,6 +264,28 @@ struct Shell {
 
 impl eframe::App for Shell {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(contact) = cad::last_contact() {
+            self.input_trace = format!(
+                "{:?} {}:{} {:?} pressure={:.2} buttons={} time={} {}",
+                contact.source,
+                contact.device,
+                contact.id,
+                contact.phase,
+                contact.pressure,
+                contact.buttons,
+                contact.time_ns,
+                if matches!(contact.source, cad::Source::Stylus | cad::Source::Eraser) { "PenDraw" } else { "Panel/Idle" }
+            );
+        }
+        for contact in winit::platform::android::cad::drain() {
+            self.input_trace = format!("{:?} {}:{} {:?} Viewport", contact.source, contact.device, contact.id, contact.phase);
+            if let Some((delta, pan, zoom)) = self.gestures.event(contact) {
+                self.input_trace.push_str(&format!(" {} delta={delta:?} zoom={zoom:.3}", if pan { "FingerPanZoom" } else { "FingerOrbit" }));
+                let scale = ctx.pixels_per_point();
+                let anchor = self.gestures.anchor().map(|[x, y]| [x / scale, y / scale]);
+                solidcraft_ui_egui::navigation::tablet_motion(&mut self.solve, [delta[0] / scale, delta[1] / scale], pan, zoom, anchor);
+            }
+        }
         self.solve.logic(ctx);
         saf_poll(&self.bridge, &self.state);
         // The soft keyboard follows egui's focus: any focused TextEdit wants it.
@@ -282,18 +308,65 @@ impl eframe::App for Shell {
         }
     }
 
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        self.keypad.restore_focus(ctx);
+        if cad::take_pen_cancel() {
+            // Cancel the active interaction before a canceled pen can be interpreted as a click.
+            raw.events.retain(|event| !matches!(event, egui::Event::PointerMoved(_) | egui::Event::PointerButton { .. }));
+            let modifiers = egui::Modifiers::default();
+            raw.events.push(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers });
+            raw.events.push(egui::Event::PointerMoved(egui::pos2(-100000.0, -100000.0)));
+            raw.events.push(egui::Event::PointerButton {
+                pos: egui::pos2(-100000.0, -100000.0),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers,
+            });
+            raw.events.push(egui::Event::PointerGone);
+            raw.events.push(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: false, repeat: false, modifiers });
+        }
+        if !raw.focused {
+            self.keypad.reset_focus();
+            self.modifiers = Modifiers::default();
+            self.gestures.reset();
+            self.keypad.shift = false;
+            self.keypad.ctrl = false;
+            winit::platform::android::cad::reset();
+        }
         apply_android_modifiers(&mut self.modifiers, raw);
+        self.keypad.input(raw, self.modifiers);
         self.ime.poll(raw);
         self.solve.raw_input_hook(raw);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         system_fonts::install_system_fonts(ui.ctx());
+        self.keypad.show(ui);
         self.solve.ui(ui);
+        if cfg!(debug_assertions) {
+            egui::Area::new(egui::Id::new("android-input-trace")).anchor(egui::Align2::RIGHT_BOTTOM, [-8.0, -8.0]).interactable(false).show(
+                ui.ctx(),
+                |ui| {
+                    ui.label(&self.input_trace);
+                },
+            );
+        }
+        let scale = ui.ctx().pixels_per_point();
+        cad::exclude(
+            solidcraft_ui_egui::navigation::tablet_exclusions(&self.solve)
+                .into_iter()
+                .map(|r| [r.min.x * scale, r.min.y * scale, r.max.x * scale, r.max.y * scale])
+                .collect(),
+        );
+        winit::platform::android::cad::viewport(
+            self.solve.viewport.rect.map(|r| [r.min.x * scale, r.min.y * scale, r.max.x * scale, r.max.y * scale]),
+        );
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if let Ok(settings) = serde_json::to_string(&self.keypad) {
+            storage.set_string("android-cad-keypad", settings);
+        }
         storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, self.solve.prefs());
     }
 
@@ -307,11 +380,7 @@ impl eframe::App for Shell {
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_max_level(log::LevelFilter::Debug)
-            .with_tag("SolidCraft"),
-    );
+    android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Debug).with_tag("SolidCraft"));
     log::info!("{ANDROID_SHELL_MARKER}");
     system_fonts::install_font_env(&app);
     let bridge = saf::Bridge::new(&app);
@@ -342,12 +411,14 @@ fn android_main(app: AndroidApp) {
         "SolidCraft",
         options,
         Box::new(move |cc| {
+            let hit_ctx = cc.egui_ctx.clone();
+            cad::hit_test(Box::new(move |[x, y]| {
+                let pos = egui::pos2(x, y) / hit_ctx.pixels_per_point();
+                hit_ctx.layer_id_at(pos).is_none_or(|layer| layer.order == egui::Order::Background)
+            }));
             solidcraft_engine::crash::phase("app setup");
             solidcraft_ui_egui::fonts::setup_fonts(&cc.egui_ctx);
-            let mut app_ui = SolveApp::new(
-                Session::default(),
-                services(shell_bridge.clone_ref(), Arc::clone(&shell_state), shell_files.clone()),
-            );
+            let mut app_ui = SolveApp::new(Session::default(), services(shell_bridge.clone_ref(), Arc::clone(&shell_state), shell_files.clone()));
             // The preferences the last run saved (agents, units, permissions…): without this the
             // app started from the defaults every time, since eframe only hands the file over.
             if let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k))) {
@@ -364,11 +435,7 @@ fn android_main(app: AndroidApp) {
             // state: without this the UI works but the 3D scene (grid, origin planes, bodies) is
             // never painted and nothing can be selected.
             if let Some(rs) = &cc.wgpu_render_state {
-                log::info!(
-                    "graphics: {:?}, MSAA {}x",
-                    rs.adapter.get_info().backend,
-                    rs.msaa_samples
-                );
+                log::info!("graphics: {:?}, MSAA {}x", rs.adapter.get_info().backend, rs.msaa_samples);
                 app_ui.set_wgpu(rs, DEPTH_BITS, STENCIL_BITS, rs.msaa_samples);
                 solidcraft_ui_egui::gpu::install_picture_renderer(rs);
             } else {
@@ -376,15 +443,15 @@ fn android_main(app: AndroidApp) {
             }
             // Optional loopback control server, so tests and agents can click by name instead of
             // guessing screen coordinates (`adb forward tcp:9977 tcp:9977`, JSON lines).
-            if let Some(port) = std::env::var("SOLIDCRAFT_CONTROL_PORT")
-                .ok()
-                .and_then(|p| p.parse::<u16>().ok())
-            {
+            if let Some(port) = std::env::var("SOLIDCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse::<u16>().ok()) {
                 let rx = control_server::start(port, cc.egui_ctx.clone());
                 app_ui = app_ui.with_control(rx);
                 log::info!("control server listening on 127.0.0.1:{port}");
             }
             Ok(Box::new(Shell {
+                input_trace: "Input diagnostics: idle".into(),
+                keypad: cc.storage.and_then(|s| s.get_string("android-cad-keypad")).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
+                gestures: finger_gestures::Gestures::default(),
                 solve: app_ui,
                 app: shell_app,
                 bridge: shell_bridge,

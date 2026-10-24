@@ -88,7 +88,9 @@ fn listen(port: u16, token: String, tx: Sender<ControlRequest>, ctx: egui::Conte
             ),
         },
         None => {
-            log::error!("solidcraft: control server listening on 127.0.0.1:{port}; no data folder for its token, clients need SOLIDCRAFT_CONTROL_TOKEN")
+            log::error!(
+                "solidcraft: control server listening on 127.0.0.1:{port}; no data folder for its token, clients need SOLIDCRAFT_CONTROL_TOKEN"
+            )
         }
     }
     let token = std::sync::Arc::new(token);

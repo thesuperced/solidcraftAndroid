@@ -102,8 +102,7 @@ pub struct ViewportState {
     pub primary_nav: Option<NavMode>,
     /// Fingers on the screen this frame (touch screens): one finger orbits, two pan and pinch.
     pub touch: Vec<(egui::TouchId, Pos2)>,
-    /// The two-finger gesture's centre and finger spread last frame, for pan and pinch.
-    pub(crate) touch_centroid: Option<Pos2>,
+    /// The two-finger gesture's spread last frame, for pinch on other platforms.
     pub(crate) touch_span: Option<f32>,
     /// Where the lone finger of this gesture landed. One finger only orbits once it has moved past
     /// a small dead zone, so a pinch's second finger can land before the first one turns the view.

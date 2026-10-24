@@ -59,7 +59,6 @@ pub mod frame_rate;
 pub mod gizmo;
 pub mod gpu;
 pub mod help;
-pub mod touch;
 #[cfg(test)]
 mod hole_direction_ui_tests;
 #[cfg(test)]
@@ -87,6 +86,7 @@ mod look_at_tests;
 #[cfg(test)]
 mod manage_dialogs_tests;
 mod material_card_review;
+pub mod touch;
 
 #[cfg(test)]
 mod measurement_ui_tests;
@@ -146,7 +146,7 @@ mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
 pub mod mouse_gesture;
-pub(crate) mod navigation;
+pub mod navigation;
 pub(crate) mod open_meshing;
 pub mod params_dialog;
 pub(crate) mod pick_buffer;

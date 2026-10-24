@@ -233,6 +233,7 @@ impl<T: 'static> EventLoop<T> {
                     );
                 },
                 MainEvent::LostFocus => {
+                    crate::platform::android::cad::reset();
                     HAS_FOCUS.store(false, Ordering::Relaxed);
                     callback(
                         event::Event::WindowEvent {
@@ -279,6 +280,7 @@ impl<T: 'static> EventLoop<T> {
                     warn!("TODO: forward saveState notification to application");
                 },
                 MainEvent::Pause => {
+                    crate::platform::android::cad::reset();
                     debug!("App Paused - stopped running");
                     self.running = false;
                 },
@@ -419,10 +421,10 @@ impl<T: 'static> EventLoop<T> {
                             // as `PointerDown` and its index has been unreliable on some panels, so
                             // report them all and let the app ignore an id it already tracks. A
                             // lost second start is a pinch that never happens.
-                            event::TouchPhase::Started | event::TouchPhase::Moved | event::TouchPhase::Cancelled => {
+                            event::TouchPhase::Moved | event::TouchPhase::Cancelled => {
                                 Box::new(motion_event.pointers())
                             }
-                            event::TouchPhase::Ended => Box::new(std::iter::once(
+                            event::TouchPhase::Started | event::TouchPhase::Ended => Box::new(std::iter::once(
                                 motion_event.pointer_at_index(motion_event.pointer_index()),
                             )),
                         };
@@ -430,6 +432,52 @@ impl<T: 'static> EventLoop<T> {
                     for pointer in pointers {
                         let location =
                             PhysicalPosition { x: pointer.x() as _, y: pointer.y() as _ };
+                        use crate::platform::android::cad::{self, Contact, Phase, Source};
+                        use android_activity::input::ToolType;
+                        let source = match pointer.tool_type() {
+                            ToolType::Finger => Source::Finger,
+                            ToolType::Stylus => Source::Stylus,
+                            ToolType::Eraser => Source::Eraser,
+                            ToolType::Mouse => Source::Mouse,
+                            _ => Source::Unknown,
+                        };
+                        let canceled = motion_event.flags().0 & 0x20 != 0;
+                        let phase = if canceled { event::TouchPhase::Cancelled } else { phase };
+                        let contact = Contact {
+                            device: motion_event.device_id(), id: pointer.pointer_id(), source,
+                            phase: match phase {
+                                event::TouchPhase::Started => Phase::Down,
+                                event::TouchPhase::Moved => Phase::Move,
+                                event::TouchPhase::Ended => Phase::Up,
+                                event::TouchPhase::Cancelled => Phase::Cancel,
+                            },
+                            position: [pointer.x(), pointer.y()], pressure: pointer.pressure(),
+                            time_ns: motion_event.event_time(), buttons: motion_event.button_state().0,
+                        };
+                        trace!("CAD contact: {contact:?}");
+                        if cad::route(contact) {
+                            // Navigation contacts bypass egui input but must still wake its frame.
+                            callback(event::Event::WindowEvent { window_id, event: event::WindowEvent::RedrawRequested }, self.window_target());
+                            continue;
+                        }
+                        // Pen contacts are pointer events, never members of egui multi-touch.
+                        if matches!(source, Source::Stylus | Source::Eraser) {
+                            if phase == event::TouchPhase::Cancelled { cad::cancel_pen(); }
+                            callback(event::Event::WindowEvent { window_id,
+                                event: event::WindowEvent::CursorMoved { device_id, position: location }
+                            }, self.window_target());
+                            let state = match phase {
+                                event::TouchPhase::Started => Some(event::ElementState::Pressed),
+                                event::TouchPhase::Ended | event::TouchPhase::Cancelled => Some(event::ElementState::Released),
+                                _ => None,
+                            };
+                            if let Some(state) = state {
+                                callback(event::Event::WindowEvent { window_id,
+                                    event: event::WindowEvent::MouseInput { device_id, state, button: event::MouseButton::Left }
+                                }, self.window_target());
+                            }
+                            continue;
+                        }
                         trace!(
                             "Input event {device_id:?}, {phase:?}, tool={:?}, loc={location:?}, \
                              pointer_id={}, canceled={}, pressure={:.3}",
@@ -946,6 +994,7 @@ impl Window {
     pub fn set_ime_cursor_area(&self, _position: Position, _size: Size) {}
 
     pub fn set_ime_allowed(&self, allowed: bool) {
+        if allowed && crate::platform::android::cad::suppress_automatic_ime() { return; }
         if allowed {
             self.app.show_soft_input(true);
         } else {
