@@ -1,1 +1,2 @@
-42b52bbdefe06ee0d27e7536902ccf8b3a74fb791507d018bbe305890cf91d3d  solidcraft-context-keypad-arm64.apk
+837f5965173128de3d47a0e50349771e105b9f0692127966ea3c7d1c81e7bfdd  solidcraft-pen-first-arm64.apk
+bd6a81553f4ec7e18778947d46349fa028bb297412ecb9287e64bd3ce31070eb  solidcraft-input-instrumentation.apk

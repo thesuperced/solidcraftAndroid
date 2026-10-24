@@ -1,4 +1,28 @@
-# SolidCraft PenTouch experimental APK
+# Latest: pen-first Android test APK
+
+Source commit: `bf64ff30d924cae8fb30db92b1a1d1fb6340fbef` (six implementation milestones).
+App: `solidcraft-pen-first-arm64.apk` (~38 MiB).
+SHA-256: `837f5965173128de3d47a0e50349771e105b9f0692127966ea3c7d1c81e7bfdd`.
+Package: `ai.storyteller.solidcraft.pentouch`; Android 9+; arm64-v8a;
+version 0.18.3; same test signing certificate as the installed previous build.
+
+Passed: seven native router/camera tests; ten shared UI event replay tests; five
+keypad tests; strict keypad Clippy; workspace formatting; ARM64 build; Android
+resource storage, alignment, signature, ABI and launcher checks. The actual dock
+was rendered offscreen through egui/WGPU and inspected. This render is not a
+physical-device screenshot.
+All 12 WebAssembly checks also pass.
+
+`solidcraft-input-instrumentation.apk` is an optional, compiled and signed native
+MotionEvent replay harness. It has not been executed on a device in this workspace.
+Physical tablet acceptance remains open. `cargo xtask ci` stops at inherited
+missing asset attributions. Full details, source changes per milestone and the
+remaining acceptance cases: [pen-first validation](../../docs/android-pen-first-validation.md).
+
+The build environment and packaging procedure below still apply. Previous
+artifact checksums and implementation notes below are historical records.
+
+# Previous contextual-keypad build
 
 Repository: https://github.com/thesuperced/solidcraftAndroid
 Branch: `feat/android-pen-touch-keypad`

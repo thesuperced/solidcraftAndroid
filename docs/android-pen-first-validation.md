@@ -31,6 +31,8 @@ The image is a host rendering of the actual widgets, not a physical-device
 screenshot. The Android motion replay harness is documented in
 `tools/android/instrumentation/README.md`.
 
+`cargo xtask wasm` also passes all 12 checked crates, including the web UI.
+
 ## Remaining verification
 
 No tablet is attached to this cloud workspace. Physical S Pen behavior, OEM palm
