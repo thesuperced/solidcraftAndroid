@@ -2,7 +2,7 @@
 
 Repository: https://github.com/thesuperced/solidcraftAndroid
 Branch: `feat/android-pen-touch-keypad`
-Commit: `a5681007839488288be5b5ae56d4b3d06d0d11c9`
+Source commit: `90977ce15b862a046bf6d67f9058ff6753312e46`
 PR: https://github.com/thesuperced/solidcraftAndroid/pull/1
 Base: Hawaii-005/solidcraft `android-latest`, `ada94401efc3a589817b14bbf2606b4b8072340b`.
 Base vendored winit tree: `df9c41652fb44b724293961ab13d25ec03da7cf7`.
@@ -11,8 +11,8 @@ Additional dependency versions are pinned in the committed Cargo.lock files.
 
 ## APK
 
-Filename: `solidcraft-pentouch-panfix-arm64.apk` (~38 MiB).
-SHA-256: `da5d455e7ef5135ba7800210805f0a47934ac59685338adc03f07558a430ff40`.
+Filename: `solidcraft-context-keypad-arm64.apk` (~38 MiB).
+SHA-256: `42b52bbdefe06ee0d27e7536902ccf8b3a74fb791507d018bbe305890cf91d3d`.
 For direct GitHub branch delivery, the original APK was repackaged with ZIP
 compression for its native library, aligned again, and signed with the same debug
 key. Android's default native-library extraction policy supports compressed libs.
@@ -30,13 +30,14 @@ the native library, explicitly stores resources.arsc, aligns, signs, and runs
 `tools/android/verify-test-apk.sh`. The latter verifies the resource-table storage
 method before signature and alignment checks. Both scripts pass `bash -n`.
 
-Galaxy Tab S7+ testing found one-finger orbit immediate but two-finger pan/pinch
-approximately one second behind, continuing after lift. Android supplies both
-pointers in each move; the shell previously ran every queued pointer sample as a
-separate `view.navigate` command and winit requested a redraw for each pointer.
-The panfix coalesces consecutive same-mode deltas (sum pan, multiply zoom) once per
-render frame and sends one redraw per Android motion event. A regression test folds
-120 queued samples into one camera update while preserving total motion.
+Galaxy Tab S7+ testing accepted one-finger orbit, coalesced two-finger pan/pinch,
+S Pen hover and geometry selection, finger navigation without geometry selection,
+and palm rejection. Testing then exposed that the permanent keypad's pointer event
+closed the inline value editor before its queued key arrived. This build replaces
+the sidebar with a contextual floating value keypad. It captures a key at pointer
+down before egui can treat it as an outside click, restores the editor owner and
+delivers the key on release. The regression test verifies capture, value replacement
+and retained focus with an actual keypad pointer press/release sequence.
 Package: `ai.storyteller.solidcraft.pentouch`.
 Label: SolidCraft PenTouch Test.
 Version: 0.18.3 (versionCode 16781827), arm64-v8a, minSdk 28, targetSdk 35.
@@ -81,13 +82,13 @@ cargo apk2 build --target aarch64-linux-android
 - `cargo xtask ci`: stops at inherited missing asset attribution for Android launcher images and vendored winit sample images. Formatting passes first.
 - `cargo xtask layers`: inherited Android app registration and UI-to-MCP same-layer dependency violations.
 - Full native workspace suite and strict Android Clippy were not completed. Android build emits existing unused-code warnings in font/host services.
-- Physical tablet tests, emulator tests, screenshots, hardware keyboard behavior, S Pen picking/drawing regression, palm rejection, simultaneous pen/finger support, performance, and SAF save/reopen: NOT RUN.
+- This contextual-keypad APK has not yet been tested on the physical tablet. Earlier branch builds passed Galaxy Tab S7+ navigation, S Pen hover/selection and palm-rejection testing. Emulator, hardware keyboard, simultaneous pen/finger, SAF save/reopen and rotation/resume tests remain incomplete.
 
 ## Implementation
 
 Typed per-pointer routing precedes egui synthesis. Captured viewport fingers cannot select geometry; pen contacts cannot join finger gestures. Gestures calculate independent deltas and centroid/span ratios, handle cancellation and contact transitions, and use the shared camera command path. Sketch mode pans to preserve the sketch plane. A bounded transport preserves ownership even on queue overflow.
 
-The five-column keypad includes numeric/ABC pages, sticky Shift/Ctrl, focus-safe next-frame text/key events, Clear, Undo/Redo, units, collapse/pin modes, resize, opacity and persisted numeric-key reordering. Both winit and Java automatic IME paths are suppressed. A test that actually clicks a keypad button verifies focus restoration and replacement of selected text.
+The five-column keypad is now a compact, titleless floating window that exists only while an editor owns keyboard focus; it does not reserve viewport width. Its numeric page includes arithmetic, units, editing controls, ✓ commit and ✕ cancel, with an ABC page for text. Key pointer events are removed from the normal UI stream before focus processing, then delivered to the retained editor. Both winit and Java automatic IME paths remain suppressed. The actual-button regression verifies capture, focus retention and replacement of selected text.
 
 Main changed files: `vendor/winit/src/platform/android_cad.rs`, `vendor/winit/src/platform/android.rs`, `vendor/winit/src/platform_impl/android/mod.rs`, `apps/solidcraft-android/src/lib.rs`, `src/keypad.rs`, `src/finger_gestures.rs`, Android Cargo.toml and Cargo.lock, `crates/ui-egui/src/navigation.rs`, `lib.rs`, `viewport.rs`, input/keypad test harnesses, and the template synchronization script. The initial branch commit also updates the Activity's focus policy. Four existing Android bridge files received formatter-only changes. No geometry-kernel implementation changes.
 
@@ -95,7 +96,7 @@ Main changed files: `vendor/winit/src/platform/android_cad.rs`, `vendor/winit/sr
 
 Keep the original SolidCraft installed. Install this APK and launch **SolidCraft PenTouch Test**; it has independent files/preferences. Export a copy of a design through SAF if needed.
 
-Test pen select/sketch/hover, one-finger orbit, two-finger pan/pinch, UI-started contact capture, simultaneous pen/finger input, resting palm and cancellation. Focus a dimension and enter `-12.5`, replace/backspace/Enter/Undo; try ABC names, sticky Shift multiselect and a hardware keyboard. Rotate, background/resume, then save/reopen a copied design and verify dimensions.
+For this build, focus a dimension and verify that the floating pad appears without shrinking the viewport. Enter `-12.5`, use backspace and re-edit, then tap ✓ and confirm the committed value. Reopen and tap ✕ to confirm cancellation; try arithmetic and the ABC page. Recheck pen select/sketch/hover and one-/two-finger navigation, then rotate, background/resume and save/reopen a copied design.
 
 Full script and architecture: https://github.com/thesuperced/solidcraftAndroid/blob/feat/android-pen-touch-keypad/docs/android-pen-touch-keypad.md
 

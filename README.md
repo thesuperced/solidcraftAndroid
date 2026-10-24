@@ -1,6 +1,6 @@
-## Download the pen/finger + keypad test APK
+## Download the Android tablet test APK
 
-[Download SolidCraft PenTouch Test APK — two-finger latency fix (arm64, Android 9+)](https://github.com/thesuperced/solidcraftAndroid/raw/refs/heads/feat/android-pen-touch-keypad/artifacts/android/solidcraft-pentouch-panfix-arm64.apk)
+[Download SolidCraft PenTouch Test APK — contextual value keypad (arm64, Android 9+)](https://github.com/thesuperced/solidcraftAndroid/raw/refs/heads/feat/android-pen-touch-keypad/artifacts/android/solidcraft-context-keypad-arm64.apk)
 
 Installs beside your original SolidCraft. [Build report, checksum and tablet testing details](artifacts/android/README.md).
 
