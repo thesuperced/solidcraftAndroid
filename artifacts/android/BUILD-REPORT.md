@@ -11,13 +11,24 @@ Additional dependency versions are pinned in the committed Cargo.lock files.
 
 ## APK
 
-Filename: `solidcraft-pentouch-test-a5681007-arm64.apk` (~38 MiB).
-SHA-256: `4fc4d6e41311ab4c8c98d711bd970a2dba4f09ed83e7a493817957da37ee0b03`.
+Filename: `solidcraft-pentouch-test-installfix-arm64.apk` (~38 MiB).
+SHA-256: `55c22cb94f7fc99f55ad2ab7145fafb9b2b27ff2358f88f45e51aeb6e36482eb`.
 For direct GitHub branch delivery, the original APK was repackaged with ZIP
 compression for its native library, aligned again, and signed with the same debug
 key. Android's default native-library extraction policy supports compressed libs.
+The first compressed download incorrectly compressed `resources.arsc` as well.
+Android 11+ rejects that for target SDK 30+; signature verification alone does
+not catch this. The replacement stores `resources.arsc` uncompressed at offset
+39459996 (divisible by 4). The packaging regression check rejects the old APK
+and accepts the replacement. No signing key, package ID or application code changed.
 The manifest, native library and classes.dex were compared byte-for-byte against
 the original build and match. Signature and 16 KB alignment verification pass.
+
+Repackaging is now reproducible with `tools/android/package-test-apk.sh INPUT OUTPUT`
+(set ANDROID_HOME, APK_TEST_KEYSTORE and APK_SIGNING_PASSWORD locally). It compresses
+the native library, explicitly stores resources.arsc, aligns, signs, and runs
+`tools/android/verify-test-apk.sh`. The latter verifies the resource-table storage
+method before signature and alignment checks. Both scripts pass `bash -n`.
 Package: `ai.storyteller.solidcraft.pentouch`.
 Label: SolidCraft PenTouch Test.
 Version: 0.18.3 (versionCode 16781827), arm64-v8a, minSdk 28, targetSdk 35.

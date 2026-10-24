@@ -1,1 +1,1 @@
-4fc4d6e41311ab4c8c98d711bd970a2dba4f09ed83e7a493817957da37ee0b03  solidcraft-pentouch-test-a5681007-arm64.apk
+55c22cb94f7fc99f55ad2ab7145fafb9b2b27ff2358f88f45e51aeb6e36482eb  solidcraft-pentouch-test-installfix-arm64.apk

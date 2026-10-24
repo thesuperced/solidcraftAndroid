@@ -71,6 +71,14 @@ is committed. The distinct package `ai.storyteller.solidcraft.pentouch`, labelle
 **SolidCraft PenTouch Test**, installs beside the original app. Its files and
 preferences are separate. Export a copy of any design you want to test through SAF.
 
+For a smaller downloadable APK, use `bash tools/android/package-test-apk.sh INPUT OUTPUT`
+from the repository root, with ANDROID_HOME, APK_TEST_KEYSTORE and APK_SIGNING_PASSWORD
+set locally. It preserves the required uncompressed/aligned resource table. Run
+`ANDROID_HOME=/path/to/sdk bash tools/android/verify-test-apk.sh OUTPUT` before
+publishing. Signature checks alone do not detect the compressed-resource-table
+installation error on Android 11+. The earlier incorrectly repackaged download
+has been superseded by `solidcraft-pentouch-test-installfix-arm64.apk`.
+
 ## Automated verification
 
 ```sh
