@@ -79,6 +79,11 @@ publishing. Signature checks alone do not detect the compressed-resource-table
 installation error on Android 11+. The earlier incorrectly repackaged download
 has been superseded by `solidcraft-pentouch-test-installfix-arm64.apk`.
 
+The current `solidcraft-pentouch-panfix-arm64.apk` additionally coalesces queued
+two-finger samples once per rendered frame. This removes the measured one-second
+pan/pinch backlog on a Galaxy Tab S7+ while preserving total centroid and span
+motion. Install it over the earlier test package with `adb install -r`.
+
 ## Automated verification
 
 ```sh

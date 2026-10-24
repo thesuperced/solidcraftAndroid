@@ -11,8 +11,8 @@ Additional dependency versions are pinned in the committed Cargo.lock files.
 
 ## APK
 
-Filename: `solidcraft-pentouch-test-installfix-arm64.apk` (~38 MiB).
-SHA-256: `55c22cb94f7fc99f55ad2ab7145fafb9b2b27ff2358f88f45e51aeb6e36482eb`.
+Filename: `solidcraft-pentouch-panfix-arm64.apk` (~38 MiB).
+SHA-256: `da5d455e7ef5135ba7800210805f0a47934ac59685338adc03f07558a430ff40`.
 For direct GitHub branch delivery, the original APK was repackaged with ZIP
 compression for its native library, aligned again, and signed with the same debug
 key. Android's default native-library extraction policy supports compressed libs.
@@ -29,6 +29,14 @@ Repackaging is now reproducible with `tools/android/package-test-apk.sh INPUT OU
 the native library, explicitly stores resources.arsc, aligns, signs, and runs
 `tools/android/verify-test-apk.sh`. The latter verifies the resource-table storage
 method before signature and alignment checks. Both scripts pass `bash -n`.
+
+Galaxy Tab S7+ testing found one-finger orbit immediate but two-finger pan/pinch
+approximately one second behind, continuing after lift. Android supplies both
+pointers in each move; the shell previously ran every queued pointer sample as a
+separate `view.navigate` command and winit requested a redraw for each pointer.
+The panfix coalesces consecutive same-mode deltas (sum pan, multiply zoom) once per
+render frame and sends one redraw per Android motion event. A regression test folds
+120 queued samples into one camera update while preserving total motion.
 Package: `ai.storyteller.solidcraft.pentouch`.
 Label: SolidCraft PenTouch Test.
 Version: 0.18.3 (versionCode 16781827), arm64-v8a, minSdk 28, targetSdk 35.

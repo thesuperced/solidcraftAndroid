@@ -277,14 +277,18 @@ impl eframe::App for Shell {
                 if matches!(contact.source, cad::Source::Stylus | cad::Source::Eraser) { "PenDraw" } else { "Panel/Idle" }
             );
         }
+        let mut queued = Vec::new();
         for contact in winit::platform::android::cad::drain() {
             self.input_trace = format!("{:?} {}:{} {:?} Viewport", contact.source, contact.device, contact.id, contact.phase);
             if let Some((delta, pan, zoom)) = self.gestures.event(contact) {
                 self.input_trace.push_str(&format!(" {} delta={delta:?} zoom={zoom:.3}", if pan { "FingerPanZoom" } else { "FingerOrbit" }));
-                let scale = ctx.pixels_per_point();
-                let anchor = self.gestures.anchor().map(|[x, y]| [x / scale, y / scale]);
-                solidcraft_ui_egui::navigation::tablet_motion(&mut self.solve, [delta[0] / scale, delta[1] / scale], pan, zoom, anchor);
+                queued.push((delta, pan, zoom));
             }
+        }
+        let scale = ctx.pixels_per_point();
+        let anchor = self.gestures.anchor().map(|[x, y]| [x / scale, y / scale]);
+        for (delta, pan, zoom) in finger_gestures::coalesce(queued) {
+            solidcraft_ui_egui::navigation::tablet_motion(&mut self.solve, [delta[0] / scale, delta[1] / scale], pan, zoom, anchor);
         }
         self.input_trace.push_str(&format!(" contacts={}", self.gestures.contact_count()));
         self.solve.logic(ctx);

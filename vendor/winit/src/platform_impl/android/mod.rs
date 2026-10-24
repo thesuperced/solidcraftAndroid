@@ -429,6 +429,7 @@ impl<T: 'static> EventLoop<T> {
                             )),
                         };
 
+                    let mut navigation_changed = false;
                     for pointer in pointers {
                         let location =
                             PhysicalPosition { x: pointer.x() as _, y: pointer.y() as _ };
@@ -456,8 +457,7 @@ impl<T: 'static> EventLoop<T> {
                         };
                         trace!("CAD contact: {contact:?}");
                         if cad::route(contact) {
-                            // Navigation contacts bypass egui input but must still wake its frame.
-                            callback(event::Event::WindowEvent { window_id, event: event::WindowEvent::RedrawRequested }, self.window_target());
+                            navigation_changed = true;
                             continue;
                         }
                         // Pen contacts are pointer events, never members of egui multi-touch.
@@ -497,6 +497,17 @@ impl<T: 'static> EventLoop<T> {
                             }),
                         };
                         callback(event, self.window_target());
+                    }
+                    if navigation_changed {
+                        // One Android motion can carry every finger. Wake one frame for the batch,
+                        // rather than enqueuing a redraw for each pointer.
+                        callback(
+                            event::Event::WindowEvent {
+                                window_id,
+                                event: event::WindowEvent::RedrawRequested,
+                            },
+                            self.window_target(),
+                        );
                     }
                 }
             },

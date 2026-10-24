@@ -8,6 +8,27 @@ pub struct Gestures {
     multi: bool,
 }
 
+pub type Motion = ([f32; 2], bool, f32);
+
+/// Fold the raw per-pointer moves queued between frames into camera updates.
+/// Android reports both pointers for every two-finger move; replaying every sample through
+/// `view.navigate` builds a visible backlog on slower tablets.
+pub fn coalesce(motions: impl IntoIterator<Item = Motion>) -> Vec<Motion> {
+    let mut batched: Vec<Motion> = Vec::new();
+    for (delta, pan, zoom) in motions {
+        if let Some((sum, previous_pan, product)) = batched.last_mut()
+            && *previous_pan == pan
+        {
+            sum[0] += delta[0];
+            sum[1] += delta[1];
+            *product *= zoom;
+        } else {
+            batched.push((delta, pan, zoom));
+        }
+    }
+    batched
+}
+
 impl Gestures {
     pub fn contact_count(&self) -> usize {
         self.contacts.len()
@@ -107,5 +128,15 @@ mod tests {
         g.event(event(1, Phase::Down, 0.0, 0.0));
         g.event(event(1, Phase::Move, f32::NAN, 0.0));
         assert!(g.contacts.is_empty());
+    }
+
+    #[test]
+    fn queued_pointer_moves_become_one_camera_update() {
+        let motions = (0..120).map(|_| ([0.5, -0.25], true, 0.999));
+        let batched = coalesce(motions);
+        assert_eq!(batched.len(), 1);
+        assert_eq!(batched[0].0, [60.0, -30.0]);
+        assert!(batched[0].1);
+        assert!((batched[0].2 - 0.999_f32.powi(120)).abs() < 1e-5);
     }
 }
