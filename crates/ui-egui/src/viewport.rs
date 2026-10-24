@@ -45,6 +45,8 @@ pub enum NavMode {
 
 #[derive(Default)]
 pub struct ViewportState {
+    tablet_press: Option<(Pos2, f64)>,
+    tablet_box_armed: bool,
     /// The arrow turning the view that is still down (`navigation::step_key_hold`).
     pub(crate) key_hold: Option<crate::navigation::KeyHold>,
     /// A two-point drawing tool's first point was placed by a press (here) that became a drag:
@@ -1792,6 +1794,10 @@ pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
 
 /// What the selection filter lets a click pick with no dialog.
 fn pick_allowed(app: &SolveApp, h: &Hit) -> bool {
+    let tablet = crate::tablet_input::policy();
+    if tablet.enabled && !tablet.filter.accepts(h) {
+        return false;
+    }
     let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
     match h {
         Hit::SketchCurve { .. } => !off("sketch") && !off("sketch_curves"),
@@ -1813,7 +1819,12 @@ fn hit_candidate(app: &SolveApp, h: &Hit) -> Option<(Hit, Sel)> {
         Hit::SketchPoint { sketch, id, .. } if app.session.active_sketch != Some(*sketch) => {
             Some((h.clone(), Sel::ExternalSketchPoint { sketch: *sketch, id: id.clone() }))
         }
-        Hit::Face { body, .. } if app.ui.pick_bodies => Some((h.clone(), Sel::Body { name: body.clone() })),
+        Hit::Face { body, .. }
+            if app.ui.pick_bodies
+                || (crate::tablet_input::policy().enabled && crate::tablet_input::policy().filter == crate::tablet_input::Filter::Bodies) =>
+        {
+            Some((h.clone(), Sel::Body { name: body.clone() }))
+        }
         _ => hit_sel(h).map(|s| (h.clone(), s)),
     }
 }
@@ -2454,6 +2465,23 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         candidate(app, &hits).map(|(h, s)| (h, Some(s)))
     };
     app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
+    if crate::tablet_input::pen() {
+        let now = ui.input(|i| i.time);
+        let policy = crate::tablet_input::policy();
+        if primary_pressed {
+            app.viewport.tablet_box_armed = false;
+            app.viewport.tablet_press = hover.filter(|_| inside && cand.is_none() && app.tool.is_none() && app.dialog.is_none()).map(|p| (p, now));
+        }
+        if let Some((origin, start)) = app.viewport.tablet_press {
+            if primary_down && now - start >= policy.hold_seconds {
+                app.viewport.tablet_box_armed = true;
+            } else if primary_down && hover.is_some_and(|p| p.distance(origin) > policy.slop) {
+                app.viewport.tablet_press = None;
+            } else if primary_down {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
+            }
+        }
+    }
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up.
     let held =
@@ -2958,6 +2986,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         let origin = ui.input(|i| i.pointer.press_origin());
         if resp.dragged_by(egui::PointerButton::Primary)
+            && (!crate::tablet_input::pen() || app.viewport.tablet_box_armed)
             && let (Some(a), Some(b)) = (origin, hover)
             && rect.contains(a)
             && !crate::shell::covered(app, a)
@@ -2977,6 +3006,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     } else {
         app.viewport.boxsel = None;
+    }
+    if !primary_down {
+        app.viewport.tablet_press = None;
+        app.viewport.tablet_box_armed = false;
     }
     crate::preview::paint_sketches(app, &painter, &proj);
     crate::ref_images::show(app, ui, &painter, &proj);
@@ -3028,6 +3061,15 @@ fn paint_box_selection(painter: &egui::Painter, bx: BoxSel, sketch: bool) {
         t.box_window
     };
     painter.rect_filled(bx.rect, 0.0, col.gamma_multiply(0.12));
+    if crate::tablet_input::policy().enabled {
+        painter.text(
+            bx.rect.left_bottom() + vec2(0.0, 8.0),
+            Align2::LEFT_TOP,
+            format!("{} · {}", crate::tablet_input::policy().filter.label(), if bx.crossing { "Crossing" } else { "Enclosed" }),
+            FontId::proportional(t.font_body),
+            col,
+        );
+    }
     if bx.crossing {
         let c = [bx.rect.left_top(), bx.rect.right_top(), bx.rect.right_bottom(), bx.rect.left_bottom()];
         for i in 0..4 {
@@ -3299,7 +3341,9 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     let to2 = |pts: &[Vec3]| -> Vec<Pos2> { pts.iter().filter_map(|p| proj.to_screen(*p)).collect() };
     let sketch_dialog = app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_)));
     let accepts = app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept);
+    let tablet = crate::tablet_input::policy();
     if (app.dialog.is_none() || sketch_dialog)
+        && (!tablet.enabled || matches!(tablet.filter, crate::tablet_input::Filter::All | crate::tablet_input::Filter::Sketch))
         && let Some(ss) = app.session.active_sketch.and_then(|sid| st.sketch(sid))
     {
         // What the selection filter lets through (window: wholly inside; crossing: touching).
@@ -3355,13 +3399,27 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             }
         }
     } else {
-        let accept = app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).unwrap_or(BODIES);
+        let tablet_accept = match tablet.filter {
+            crate::tablet_input::Filter::Faces => FACES,
+            crate::tablet_input::Filter::Edges => EDGES,
+            crate::tablet_input::Filter::Vertices => crate::selection::VERTICES,
+            crate::tablet_input::Filter::Sketch => PROFILES,
+            _ => BODIES,
+        };
+        let accept =
+            app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).unwrap_or(if tablet.enabled { tablet_accept } else { BODIES });
         for b in &st.bodies {
             if !app.session.body_visible(&b.name) {
                 continue;
             }
             let m = b.mesh();
-            if accept & EDGES != 0 {
+            if accept & crate::selection::VERTICES != 0 {
+                for point in m.edges.iter().flat_map(|edge| [edge.first(), edge.last()].into_iter().flatten()) {
+                    if bx.takes(&to2(&[*point])) {
+                        out.push(Sel::Vertex { body: b.name.clone(), point: *point });
+                    }
+                }
+            } else if accept & EDGES != 0 {
                 for (ei, e) in m.edges.iter().enumerate() {
                     let rim = m.circular_rim(ei);
                     let takes = if bx.crossing { bx.takes(&to2(e)) } else { rim.iter().all(|&i| m.edges.get(i).is_some_and(|p| bx.takes(&to2(p)))) };
