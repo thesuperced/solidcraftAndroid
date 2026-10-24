@@ -86,6 +86,7 @@ mod look_at_tests;
 #[cfg(test)]
 mod manage_dialogs_tests;
 mod material_card_review;
+pub mod tablet_input;
 pub mod touch;
 
 #[cfg(test)]

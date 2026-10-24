@@ -408,6 +408,7 @@ pub fn track_hold(
     let consumed = app.viewport.select_other.held;
     let now = ctx.input(|i| i.time);
     let free = app.tool.is_none()
+        && (!crate::tablet_input::pen() || app.viewport.hover.is_some())
         && app.viewport.context_menu.is_none()
         && !is_open(app)
         && app.dialog.as_ref().is_none_or(|d| d.wants_picks())
@@ -420,7 +421,7 @@ pub fn track_hold(
         let slop = ctx.options(|o| o.input_options.max_click_dist);
         if !down || navigating || !free || hover.is_some_and(|p| p.distance(p0) > slop) {
             app.viewport.select_other.hold = None;
-        } else if now - t0 >= HOLD_SECS {
+        } else if now - t0 >= if crate::tablet_input::pen() { crate::tablet_input::policy().hold_seconds } else { HOLD_SECS } {
             app.viewport.select_other.hold = None;
             opened = open_with(app, proj, p0);
             app.viewport.select_other.held = true;
@@ -571,7 +572,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(i) = picked {
         let held = crate::tool_modifiers::Held::from_modifiers(mods);
         let (add, toggle) = crate::tool_modifiers::selection_click(held, app.preferences.selection_shift_add_only);
-        let _ = choose(app, i, add, toggle);
+        let pen = crate::tablet_input::pen();
+        let _ = choose(app, i, add || pen, toggle || pen);
     } else if pressed && !pointer.is_some_and(|q| resp.response.rect.contains(q)) {
         // A press elsewhere only closes the list.
         close(app);

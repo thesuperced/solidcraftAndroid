@@ -8,6 +8,22 @@ use solidcraft_engine::geom::Vec3;
 
 use crate::viewport::Hit;
 
+/// Promote a face's body atomically, reconciling the first tap and preserving other bodies.
+/// Promotion always selects the body, even if it was selected before the double tap.
+pub fn promote_body(current: &[Sel], body: &str) -> Vec<Sel> {
+    let mut out: Vec<_> = current
+        .iter()
+        .filter(|item| match item {
+            Sel::Body { name } => name != body,
+            Sel::Face { body: name, .. } | Sel::Edge { body: name, .. } | Sel::Vertex { body: name, .. } => name != body,
+            _ => true,
+        })
+        .cloned()
+        .collect();
+    out.push(Sel::Body { name: body.into() });
+    out
+}
+
 /// Model picks retain an on-surface point, but their identity is the body and topology index.
 pub(crate) fn same_item(a: &Sel, b: &Sel) -> bool {
     match (a, b) {
