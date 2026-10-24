@@ -1,6 +1,8 @@
 ## Download the Android tablet test APK
 
-[Download SolidCraft PenTouch Test APK — contextual value keypad (arm64, Android 9+)](https://github.com/thesuperced/solidcraftAndroid/raw/refs/heads/feat/android-pen-touch-keypad/artifacts/android/solidcraft-context-keypad-arm64.apk)
+[Download SolidCraft PenTouch Test APK — pen-first selection and controls (arm64, Android 9+)](https://github.com/thesuperced/solidcraftAndroid/raw/refs/heads/feat/android-pen-touch-keypad/artifacts/android/solidcraft-pen-first-arm64.apk)
+
+[Windows tablet updater](tools/android/update-tablet.ps1) · [Implementation and validation](docs/android-pen-first-validation.md)
 
 Installs beside your original SolidCraft. [Build report, checksum and tablet testing details](artifacts/android/README.md).
 
