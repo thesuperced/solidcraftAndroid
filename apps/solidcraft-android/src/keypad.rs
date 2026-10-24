@@ -50,10 +50,10 @@ impl Keypad {
         self.ctrl = false;
     }
     pub fn restore_focus(&self, ctx: &egui::Context) {
-        if !self.pending.is_empty() {
-            if let Some(owner) = self.owner {
-                ctx.memory_mut(|m| m.request_focus(owner));
-            }
+        if !self.pending.is_empty()
+            && let Some(owner) = self.owner
+        {
+            ctx.memory_mut(|m| m.request_focus(owner));
         }
     }
     fn key(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
@@ -265,9 +265,7 @@ mod tests {
     }
     #[test]
     fn settings_never_persist_modifiers_or_input() {
-        let mut pad = Keypad::default();
-        pad.shift = true;
-        pad.ctrl = true;
+        let mut pad = Keypad { shift: true, ctrl: true, ..Default::default() };
         pad.pending.push(egui::Event::Text("private filename".into()));
         let encoded = serde_json::to_string(&pad).unwrap();
         assert!(!encoded.contains("private filename"));
@@ -276,8 +274,7 @@ mod tests {
     }
     #[test]
     fn modifiers_combine_with_physical_keyboard() {
-        let mut pad = Keypad::default();
-        pad.shift = true;
+        let mut pad = Keypad { shift: true, ..Default::default() };
         let mut raw = egui::RawInput::default();
         pad.input(&mut raw, egui::Modifiers { ctrl: true, ..Default::default() });
         assert!(matches!(raw.events.first(), Some(egui::Event::ModifiersChanged(m)) if m.shift && m.ctrl));

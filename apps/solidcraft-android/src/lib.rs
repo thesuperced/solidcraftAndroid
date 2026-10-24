@@ -286,6 +286,7 @@ impl eframe::App for Shell {
                 solidcraft_ui_egui::navigation::tablet_motion(&mut self.solve, [delta[0] / scale, delta[1] / scale], pan, zoom, anchor);
             }
         }
+        self.input_trace.push_str(&format!(" contacts={}", self.gestures.contact_count()));
         self.solve.logic(ctx);
         saf_poll(&self.bridge, &self.state);
         // The soft keyboard follows egui's focus: any focused TextEdit wants it.

@@ -9,6 +9,9 @@ pub struct Gestures {
 }
 
 impl Gestures {
+    pub fn contact_count(&self) -> usize {
+        self.contacts.len()
+    }
     pub fn anchor(&self) -> Option<[f32; 2]> {
         let count = self.contacts.len();
         if count == 0 {

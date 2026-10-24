@@ -112,6 +112,11 @@ are NOT RUN in this environment. This is an experimental test build, not a verif
 ## Validation notes
 
 The host UI check and targeted UI Clippy (`--locked -- -D warnings`) pass.
+Keypad Clippy with all targets and warnings denied also passes. `cargo xtask wasm`
+passes for all 12 checked crates; workspace `cargo fmt --all -- --check` passes.
+`cargo xtask licences --check` passes (generated notices are deferred to the project's
+normal Generated files workflow). The arm64 Android native and Java code compile;
+the APK is debug-signed for tablet testing, with no physical-device pass claimed.
 The three router/gesture tests and four keypad tests pass. The keypad suite includes
 an actual pointer press/release on a keypad button, followed by queued text input.
 Android bridge files also received formatter-only updates to satisfy workspace formatting.
