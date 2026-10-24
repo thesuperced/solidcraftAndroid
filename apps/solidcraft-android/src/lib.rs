@@ -24,10 +24,26 @@ use android_activity::AndroidApp;
 use egui::Modifiers;
 use jni::{JavaVM, jni_sig, jni_str, objects::JObject};
 use solidcraft_engine::Session;
+use solidcraft_ui_egui::tablet_input;
 use solidcraft_ui_egui::{Services, SolveApp};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use winit::platform::android::cad;
+
+fn input_config(app: &AndroidApp) -> [i32; 3] {
+    // SAFETY: AndroidApp owns the live VM and activity reference throughout this call.
+    let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr() as *mut _) };
+    vm.attach_current_thread(|env| -> jni::errors::Result<[i32; 3]> {
+        let raw = app.activity_as_ptr() as jni::sys::jobject;
+        let activity = unsafe { env.as_cast_raw::<JObject>(&raw)? };
+        let mut values = [8, 500, 300];
+        for (index, value) in values.iter_mut().enumerate() {
+            *value = env.call_method(&*activity, jni_str!("cadInputConfig"), jni_sig!("(I)I"), &[jni::objects::JValue::Int(index as i32)])?.i()?;
+        }
+        Ok(values)
+    })
+    .unwrap_or([8, 500, 300])
+}
 
 const ANDROID_SHELL_MARKER: &str = "SOLIDCRAFT_ANDROID_SHELL_V6_IME_SNAPSHOT";
 
@@ -247,6 +263,10 @@ fn apply_env_overrides(dir: &std::path::Path) {
 // ---------------------------------------------------------------- shell
 
 struct Shell {
+    off_hand: std::collections::BTreeMap<(i32, i32), (egui::accesskit::NodeId, egui::accesskit::Action, [f32; 2])>,
+    pen_transaction: tablet_input::Transaction,
+    dock: tablet_input::Dock,
+    input_config: [i32; 3],
     input_trace: String,
     keypad: keypad::Keypad,
     gestures: finger_gestures::Gestures,
@@ -314,13 +334,75 @@ impl eframe::App for Shell {
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let context =
+            self.solve.tool.as_ref().map(|tool| tool.cmd.to_owned()).unwrap_or_else(|| {
+                self.solve.dialog.as_ref().map(|dialog| format!("{:?}", std::mem::discriminant(&dialog.kind))).unwrap_or_default()
+            });
+        self.dock.context(context);
+        let slop = (self.input_config[0] as f32 / ctx.pixels_per_point()).clamp(2.0, 64.0);
+        let hold = (self.input_config[1] as f64 / 1000.0).clamp(0.2, 2.0);
+        ctx.options_mut(|options| {
+            options.input_options.max_click_dist = slop;
+            options.input_options.max_double_click_delay = (self.input_config[2] as f64 / 1000.0).clamp(0.15, 1.0);
+        });
+        for event in cad::drain_controls() {
+            let c = event.contact;
+            let at = [c.position[0] / ctx.pixels_per_point(), c.position[1] / ctx.pixels_per_point()];
+            if event.control == 254 {
+                let key = (c.device, c.id);
+                if c.phase == cad::Phase::Down {
+                    if let Some((id, action)) = tablet_input::off_hand_target(ctx, at) {
+                        self.off_hand.insert(key, (id, action, at));
+                    }
+                } else if matches!(c.phase, cad::Phase::Up | cad::Phase::Cancel) {
+                    if let Some((id, action, origin)) = self.off_hand.remove(&key) {
+                        if c.phase == cad::Phase::Up && (at[0] - origin[0]).hypot(at[1] - origin[1]) <= slop {
+                            raw.events.push(tablet_input::off_hand_action(id, action));
+                        }
+                    }
+                }
+                continue;
+            }
+            if matches!(c.phase, cad::Phase::Down | cad::Phase::Up | cad::Phase::Cancel) {
+                self.dock.contact(
+                    c.device,
+                    c.id,
+                    event.control,
+                    c.phase == cad::Phase::Down,
+                    c.phase == cad::Phase::Cancel,
+                    [c.position[0] / ctx.pixels_per_point(), c.position[1] / ctx.pixels_per_point()],
+                    c.time_ns as f64 / 1e9,
+                    hold,
+                    slop,
+                );
+            }
+        }
+        tablet_input::set(tablet_input::Policy {
+            enabled: true,
+            pen: matches!(cad::pointer_source(), cad::Source::Stylus | cad::Source::Eraser),
+            hold_seconds: hold,
+            slop,
+            actions: self.dock.actions(),
+            filter: self.dock.filter,
+        });
+        if tablet_input::pen()
+            && raw.events.iter().any(|e| {
+                matches!(e, egui::Event::PointerButton { pos, pressed: true, button: egui::PointerButton::Primary, .. }
+            if self.solve.viewport.rect.is_some_and(|r| r.contains(*pos)))
+            })
+        {
+            self.pen_transaction.begin(&mut self.solve);
+        }
         self.keypad.intercept_pointer(ctx, raw);
         self.keypad.restore_focus(ctx);
         if cad::take_pen_cancel() {
+            self.off_hand.clear();
+            self.dock.reset();
+            tablet_input::set(tablet_input::Policy { enabled: true, ..Default::default() });
+            self.pen_transaction.cancel(&mut self.solve);
             // Cancel the active interaction before a canceled pen can be interpreted as a click.
             raw.events.retain(|event| !matches!(event, egui::Event::PointerMoved(_) | egui::Event::PointerButton { .. }));
             let modifiers = egui::Modifiers::default();
-            raw.events.push(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers });
             raw.events.push(egui::Event::PointerMoved(egui::pos2(-100000.0, -100000.0)));
             raw.events.push(egui::Event::PointerButton {
                 pos: egui::pos2(-100000.0, -100000.0),
@@ -329,9 +411,12 @@ impl eframe::App for Shell {
                 modifiers,
             });
             raw.events.push(egui::Event::PointerGone);
-            raw.events.push(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: false, repeat: false, modifiers });
         }
         if !raw.focused {
+            self.off_hand.clear();
+            self.dock.reset();
+            tablet_input::set(tablet_input::Policy { enabled: true, ..Default::default() });
+            self.pen_transaction.cancel(&mut self.solve);
             self.keypad.reset_focus();
             self.modifiers = Modifiers::default();
             self.gestures.reset();
@@ -349,6 +434,17 @@ impl eframe::App for Shell {
         system_fonts::install_system_fonts(ui.ctx());
         self.keypad.show(ui);
         self.solve.ui(ui);
+        tablet_input::context_actions(&mut self.solve, ui.ctx());
+        if !ui.input(|i| i.pointer.primary_down()) {
+            self.pen_transaction.complete(&mut self.solve);
+        }
+        let scale = ui.ctx().pixels_per_point();
+        let regions = if self.solve.viewport.rect.is_some() && !ui.ctx().egui_wants_keyboard_input() {
+            self.dock.show(ui.ctx(), self.solve.session.active_sketch.is_some(), self.solve.dialog.is_some(), self.solve.viewport.boxsel.is_some())
+        } else {
+            Vec::new()
+        };
+        cad::controls(regions.into_iter().map(|(id, r)| (id, [r.min.x * scale, r.min.y * scale, r.max.x * scale, r.max.y * scale])).collect());
         if cfg!(debug_assertions) {
             egui::Area::new(egui::Id::new("android-input-trace")).anchor(egui::Align2::RIGHT_BOTTOM, [-8.0, -8.0]).interactable(false).show(
                 ui.ctx(),
@@ -386,6 +482,7 @@ impl eframe::App for Shell {
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
+    let cad_config = input_config(&app);
     android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Debug).with_tag("SolidCraft"));
     log::info!("{ANDROID_SHELL_MARKER}");
     system_fonts::install_font_env(&app);
@@ -417,6 +514,7 @@ fn android_main(app: AndroidApp) {
         "SolidCraft",
         options,
         Box::new(move |cc| {
+            tablet_input::install(&cc.egui_ctx);
             let hit_ctx = cc.egui_ctx.clone();
             cad::hit_test(Box::new(move |[x, y]| {
                 let pos = egui::pos2(x, y) / hit_ctx.pixels_per_point();
@@ -455,6 +553,10 @@ fn android_main(app: AndroidApp) {
                 log::info!("control server listening on 127.0.0.1:{port}");
             }
             Ok(Box::new(Shell {
+                off_hand: Default::default(),
+                pen_transaction: tablet_input::Transaction::default(),
+                dock: tablet_input::Dock::default(),
+                input_config: cad_config,
                 input_trace: "Input diagnostics: idle".into(),
                 keypad: cc.storage.and_then(|s| s.get_string("android-cad-keypad")).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
                 gestures: finger_gestures::Gestures::default(),

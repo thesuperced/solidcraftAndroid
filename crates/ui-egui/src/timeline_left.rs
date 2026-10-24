@@ -247,7 +247,7 @@ fn select_item(app: &mut SolveApp, ui: &egui::Ui, item: TimelineItem, order: &[T
     if !modifiers.command && !modifiers.ctrl {
         app.tree.picked_joints.clear();
     }
-    if modifiers.shift
+    if (modifiers.shift || crate::tablet_input::action(crate::tablet_input::RANGE))
         && let Some(anchor) = app.tree.timeline_anchor.as_deref()
         && let (Some(from), Some(to)) = (order.iter().position(|entry| entry.key() == anchor), order.iter().position(|entry| *entry == item))
     {
@@ -282,7 +282,8 @@ fn select_item(app: &mut SolveApp, ui: &egui::Ui, item: TimelineItem, order: &[T
     }
 
     app.tree.timeline_anchor = Some(item.key());
-    let additive = modifiers.command || modifiers.ctrl;
+    let touch_add = crate::tablet_input::action(crate::tablet_input::ADD);
+    let additive = modifiers.command || modifiers.ctrl || touch_add;
     match item {
         TimelineItem::Group(id) => {
             if !additive {
@@ -301,7 +302,7 @@ fn select_item(app: &mut SolveApp, ui: &egui::Ui, item: TimelineItem, order: &[T
                 let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": id}]}));
             } else {
                 let selected = selected_feature_ids(app);
-                if selected.contains(&id) {
+                if selected.contains(&id) && !touch_add {
                     let items: Vec<_> =
                         selected.into_iter().filter(|selected| *selected != id).map(|selected| json!({"type": "feature", "id": selected})).collect();
                     let _ = app.run("select.set", json!({"items": items}));

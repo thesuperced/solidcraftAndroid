@@ -486,6 +486,20 @@ pub fn resolve(context: &[Scope], tool: Option<&ToolModifiers>, held: Held, trig
     for slot in best_group.into_iter().flatten() {
         set.insert(slot.1);
     }
+    use crate::tablet_input as tablet;
+    // Touch controls contribute semantic actions directly. A physical toggle chord wins
+    // over the touch Add latch; no synthetic keyboard state is introduced.
+    for (index, action, allowed) in [
+        (tablet::ADD, ModAction::SelectAdd, context.contains(&Scope::Selection)),
+        (tablet::NO_SNAP, ModAction::SuppressSnap, context.contains(&Scope::SketchDraw) || context.contains(&Scope::SketchDrag)),
+        (tablet::FREE, ModAction::FreeManipulatorDrag, true),
+        (tablet::MIDPOINT, ModAction::TargetMidpoint, context.contains(&Scope::SketchDraw) || context.contains(&Scope::SketchDrag)),
+        (tablet::RESELECT, ModAction::PreviewReselect, context.contains(&Scope::FeaturePreview)),
+    ] {
+        if allowed && tablet::action(index) && !(action == ModAction::SelectAdd && set.contains(ModAction::SelectToggle)) {
+            set.insert(action);
+        }
+    }
     set
 }
 
