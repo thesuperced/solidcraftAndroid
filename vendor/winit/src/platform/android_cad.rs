@@ -14,22 +14,26 @@ pub fn take_pen_cancel() -> bool {
     PEN_CANCELED.swap(false, Ordering::Relaxed)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Source {
     Finger,
     Stylus,
     Eraser,
     Mouse,
+    #[default]
     Unknown,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Phase {
+    #[default]
     Down,
     Move,
     Up,
     Cancel,
+    Hover,
+    Leave,
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Contact {
     pub device: i32,
     pub id: i32,
@@ -39,17 +43,148 @@ pub struct Contact {
     pub pressure: f32,
     pub time_ns: i64,
     pub buttons: u32,
+    pub tilt: f32,
+    pub orientation: f32,
+    pub historical: bool,
 }
-struct Router {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Owner {
+    Ui,
+    Modeling,
+    Camera,
+    Control(u8),
+    Rejected,
+}
+#[derive(Clone, Copy, Debug)]
+pub struct ControlEvent {
+    pub control: u8,
+    pub contact: Contact,
+}
+pub struct CadInputRouter {
     excluded: Vec<[f32; 4]>,
     last: Option<Contact>,
     region: Option<[f32; 4]>,
-    owners: BTreeMap<(i32, i32), bool>,
+    owners: BTreeMap<(i32, i32), Owner>,
     events: Vec<Contact>,
+    controls: Vec<(u8, [f32; 4])>,
+    control_events: Vec<ControlEvent>,
+    pointer_source: Source,
     hit_test: Option<Box<dyn Fn([f32; 2]) -> bool + Send>>,
 }
-static ROUTER: Mutex<Router> =
-    Mutex::new(Router { excluded: Vec::new(), last: None, region: None, owners: BTreeMap::new(), events: Vec::new(), hit_test: None });
+static ROUTER: Mutex<CadInputRouter> = Mutex::new(CadInputRouter::new());
+impl Default for CadInputRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+fn contains([x0, y0, x1, y1]: [f32; 4], [x, y]: [f32; 2]) -> bool {
+    x.is_finite() && y.is_finite() && x >= x0 && y >= y0 && x <= x1 && y <= y1
+}
+impl CadInputRouter {
+    pub const fn new() -> Self {
+        Self {
+            excluded: Vec::new(),
+            last: None,
+            region: None,
+            owners: BTreeMap::new(),
+            events: Vec::new(),
+            controls: Vec::new(),
+            control_events: Vec::new(),
+            pointer_source: Source::Unknown,
+            hit_test: None,
+        }
+    }
+    pub fn owner(&self, device: i32, id: i32) -> Option<Owner> {
+        self.owners.get(&(device, id)).copied()
+    }
+    pub fn route(&mut self, event: Contact) -> bool {
+        self.last = Some(event);
+        if matches!(event.phase, Phase::Hover | Phase::Leave) {
+            if event.source != Source::Finger {
+                self.pointer_source = event.source;
+            }
+            return false;
+        }
+        let key = (event.device, event.id);
+        if event.phase == Phase::Down {
+            let pen_down = self.owners.values().any(|o| *o == Owner::Modeling);
+            let control = self.controls.iter().find(|(_, r)| contains(*r, event.position)).map(|(id, _)| *id);
+            let viewport = self.region.is_some_and(|r| contains(r, event.position))
+                && !self.excluded.iter().any(|r| contains(*r, event.position))
+                && self.hit_test.as_ref().is_none_or(|test| test(event.position));
+            let owner = if let Some(id) = control {
+                Owner::Control(id)
+            } else if !viewport {
+                Owner::Ui
+            } else {
+                match event.source {
+                    Source::Stylus | Source::Eraser => Owner::Modeling,
+                    Source::Finger if !pen_down => Owner::Camera,
+                    Source::Mouse => Owner::Ui,
+                    _ => Owner::Rejected,
+                }
+            };
+            self.owners.entry(key).or_insert(owner);
+            // Reject already captured viewport fingers if a pen begins modeling. Explicit UI
+            // controls keep their owners and remain usable by the off hand.
+            if owner == Owner::Modeling {
+                for captured in self.owners.values_mut() {
+                    if *captured == Owner::Camera {
+                        *captured = Owner::Rejected;
+                    }
+                }
+                self.events.push(Contact { phase: Phase::Cancel, source: Source::Finger, ..event });
+            }
+        }
+        let owner = self.owner(event.device, event.id).unwrap_or(Owner::Rejected);
+        match owner {
+            Owner::Camera => {
+                if self.events.len() >= 4096 {
+                    self.events.clear();
+                    self.events.push(Contact { phase: Phase::Cancel, ..event });
+                    for o in self.owners.values_mut() {
+                        if *o == Owner::Camera {
+                            *o = Owner::Rejected;
+                        }
+                    }
+                } else {
+                    self.events.push(event);
+                }
+            }
+            Owner::Control(control) => {
+                if self.control_events.len() >= 4096 {
+                    self.control_events.clear();
+                    // Cancel every control on overflow, including controls on other devices.
+                    for (&(device, id), captured) in &mut self.owners {
+                        if let Owner::Control(control) = *captured {
+                            self.control_events.push(ControlEvent { control, contact: Contact { device, id, phase: Phase::Cancel, ..event } });
+                            *captured = Owner::Rejected;
+                        }
+                    }
+                } else {
+                    self.control_events.push(ControlEvent { control, contact: event });
+                }
+            }
+            Owner::Ui | Owner::Modeling => self.pointer_source = event.source,
+            Owner::Rejected => {}
+        }
+        if matches!(event.phase, Phase::Up | Phase::Cancel) {
+            self.owners.remove(&key);
+        }
+        matches!(owner, Owner::Camera | Owner::Control(_) | Owner::Rejected)
+    }
+}
+pub fn controls(regions: Vec<(u8, [f32; 4])>) {
+    if let Ok(mut state) = ROUTER.lock() {
+        state.controls = regions;
+    }
+}
+pub fn drain_controls() -> Vec<ControlEvent> {
+    ROUTER.lock().map(|mut s| std::mem::take(&mut s.control_events)).unwrap_or_default()
+}
+pub fn pointer_source() -> Source {
+    ROUTER.lock().map(|s| s.pointer_source).unwrap_or_default()
+}
 pub fn exclude(regions: Vec<[f32; 4]>) {
     if let Ok(mut state) = ROUTER.lock() {
         state.excluded = regions;
@@ -74,41 +209,70 @@ pub fn reset() {
     if let Ok(mut state) = ROUTER.lock() {
         state.owners.clear();
         state.events.clear();
+        state.control_events.clear();
+        state.pointer_source = Source::Unknown;
     }
 }
 pub fn drain() -> Vec<Contact> {
     ROUTER.lock().map(|mut state| std::mem::take(&mut state.events)).unwrap_or_default()
 }
-/// True means this contact belongs exclusively to camera navigation.
+/// True means this contact is captured by navigation, a semantic control or palm rejection.
 pub fn route(event: Contact) -> bool {
     let Ok(mut state) = ROUTER.lock() else { return false };
-    state.last = Some(event);
-    if event.source != Source::Finger {
-        return false;
+    state.route(event)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn contact(id: i32, source: Source, phase: Phase, x: f32) -> Contact {
+        Contact { device: 7, id, source, phase, position: [x, 20.0], ..Default::default() }
     }
-    let key = (event.device, event.id);
-    if event.phase == Phase::Down {
-        let inside = state.region.is_some_and(|[x0, y0, x1, y1]| {
-            let [x, y] = event.position;
-            x.is_finite() && y.is_finite() && x >= x0 && y >= y0 && x <= x1 && y <= y1
-        }) && !state
-            .excluded
-            .iter()
-            .any(|r| event.position[0] >= r[0] && event.position[1] >= r[1] && event.position[0] <= r[2] && event.position[1] <= r[3])
-            && state.hit_test.as_ref().is_none_or(|test| test(event.position));
-        state.owners.entry(key).or_insert(inside);
+    fn router() -> CadInputRouter {
+        let mut r = CadInputRouter::new();
+        r.region = Some([0.0, 0.0, 100.0, 100.0]);
+        r.controls = vec![(3, [110.0, 0.0, 160.0, 100.0])];
+        r
     }
-    let camera = state.owners.get(&key).copied().unwrap_or(false);
-    if camera {
-        if state.events.len() >= 4096 {
-            state.events.clear();
-            state.events.push(Contact { phase: Phase::Cancel, ..event });
-        } else {
-            state.events.push(event);
-        }
+    #[test]
+    fn capture_uses_ids_and_never_changes_on_crossing() {
+        let mut r = router();
+        assert!(r.route(contact(41, Source::Finger, Phase::Down, 20.0)));
+        assert!(r.route(contact(9, Source::Finger, Phase::Down, 40.0)));
+        assert!(r.route(contact(41, Source::Finger, Phase::Up, 200.0)));
+        assert_eq!(r.owner(7, 9), Some(Owner::Camera));
+        assert!(r.route(contact(9, Source::Finger, Phase::Move, 130.0)));
+        assert!(r.control_events.is_empty());
+        assert!(!r.route(contact(22, Source::Finger, Phase::Down, 200.0)));
+        assert!(!r.route(contact(22, Source::Finger, Phase::Move, 30.0)));
     }
-    if matches!(event.phase, Phase::Up | Phase::Cancel) {
-        state.owners.remove(&key);
+    #[test]
+    fn off_hand_control_and_pen_have_independent_owners() {
+        let mut r = router();
+        assert!(!r.route(contact(8, Source::Stylus, Phase::Down, 10.0)));
+        assert!(r.route(contact(4, Source::Finger, Phase::Down, 130.0)));
+        assert_eq!(r.owner(7, 4), Some(Owner::Control(3)));
+        assert!(r.route(contact(5, Source::Finger, Phase::Down, 30.0)));
+        assert_eq!(r.owner(7, 5), Some(Owner::Rejected));
+        assert!(!r.route(contact(8, Source::Stylus, Phase::Move, 140.0)));
+        assert!(r.route(contact(4, Source::Finger, Phase::Cancel, 10.0)));
+        assert_eq!(r.owner(7, 8), Some(Owner::Modeling));
+        assert_eq!(r.control_events.last().unwrap().contact.phase, Phase::Cancel);
     }
-    camera
+    #[test]
+    fn eraser_mouse_hover_and_historical_metadata_are_distinct() {
+        let mut r = router();
+        let e = Contact { tilt: 0.4, orientation: -0.8, pressure: 0.3, time_ns: 91, buttons: 32, ..contact(7, Source::Eraser, Phase::Down, 20.0) };
+        assert!(!r.route(e));
+        assert!(!r.route(Contact { phase: Phase::Move, historical: true, ..e }));
+        let last = r.last.unwrap();
+        assert!(last.historical);
+        assert_eq!((last.tilt, last.orientation, last.time_ns, last.buttons), (0.4, -0.8, 91, 32));
+        assert!(!r.route(Contact { phase: Phase::Cancel, ..e }));
+        assert!(r.owners.is_empty());
+        assert!(!r.route(contact(1, Source::Mouse, Phase::Down, 30.0)));
+        assert_eq!(r.owner(7, 1), Some(Owner::Ui));
+        r.route(contact(6, Source::Stylus, Phase::Hover, 10.0));
+        assert_eq!(r.owner(7, 6), None);
+    }
 }

@@ -93,6 +93,7 @@ impl Gestures {
                 let zoom = if span(c, d) > 1.0 { span(a, b) / span(c, d) } else { 1.0 };
                 Some(([(c[0] + d[0] - a[0] - b[0]) * 0.5, (c[1] + d[1] - a[1] - b[1]) * 0.5], true, zoom))
             }
+            Phase::Hover | Phase::Leave => None,
         }
     }
 }
@@ -102,7 +103,7 @@ mod tests {
     use super::*;
     use crate::cad::Source;
     fn event(id: i32, phase: Phase, x: f32, y: f32) -> Contact {
-        Contact { device: 1, id, source: Source::Finger, phase, position: [x, y], pressure: 1.0, time_ns: 0, buttons: 0 }
+        Contact { device: 1, id, source: Source::Finger, phase, position: [x, y], pressure: 1.0, ..Default::default() }
     }
     #[test]
     fn tap_slop_orbit_pinch_and_lift() {
