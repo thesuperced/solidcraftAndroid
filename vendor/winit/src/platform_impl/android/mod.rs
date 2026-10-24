@@ -383,8 +383,17 @@ impl<T: 'static> EventLoop<T> {
                 // pointer move, so the viewport can show what a tap would pick before it lands.
                 // A stylus hovering or leaving is not drawing: never leave the flag set, or every
                 // finger afterwards is mistaken for a palm and dropped.
-                if matches!(motion_event.action(), MotionAction::HoverMove | MotionAction::HoverEnter) {
+                if matches!(motion_event.action(), MotionAction::HoverMove | MotionAction::HoverEnter | MotionAction::HoverExit) {
                     if let Some(pointer) = motion_event.pointers().next() {
+                        use crate::platform::android::cad::{self, Contact, Phase, Source};
+                        use android_activity::input::{Axis, ToolType};
+                        cad::route(Contact { device: motion_event.device_id(), id: pointer.pointer_id(),
+                            source: match pointer.tool_type() { ToolType::Stylus => Source::Stylus, ToolType::Eraser => Source::Eraser, ToolType::Mouse => Source::Mouse, _ => Source::Unknown },
+                            phase: if motion_event.action() == MotionAction::HoverExit { Phase::Leave } else { Phase::Hover },
+                            position: [pointer.x(), pointer.y()], pressure: pointer.pressure(),
+                            tilt: pointer.axis_value(Axis::Tilt), orientation: pointer.orientation(),
+                            time_ns: motion_event.event_time(), buttons: motion_event.button_state().0, historical: false });
+                        if motion_event.action() == MotionAction::HoverExit { return InputStatus::Handled; }
                         let position = PhysicalPosition { x: pointer.x() as _, y: pointer.y() as _ };
                         callback(
                             event::Event::WindowEvent {
@@ -454,7 +463,15 @@ impl<T: 'static> EventLoop<T> {
                             },
                             position: [pointer.x(), pointer.y()], pressure: pointer.pressure(),
                             time_ns: motion_event.event_time(), buttons: motion_event.button_state().0,
+                            tilt: pointer.axis_value(android_activity::input::Axis::Tilt), orientation: pointer.orientation(), historical: false,
                         };
+                        if phase == event::TouchPhase::Moved && matches!(source, Source::Stylus | Source::Eraser) {
+                            for sample in pointer.history().take(256) {
+                                cad::route(Contact { position: [sample.x(), sample.y()], pressure: sample.pressure(),
+                                    tilt: sample.axis_value(android_activity::input::Axis::Tilt), orientation: sample.orientation(),
+                                    time_ns: sample.event_time(), historical: true, ..contact });
+                            }
+                        }
                         trace!("CAD contact: {contact:?}");
                         if cad::route(contact) {
                             navigation_changed = true;
