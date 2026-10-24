@@ -2647,7 +2647,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !held
             && app.dialog.is_none()
             && crate::dim_view::pick_reference(ui.ctx(), p, resp.double_clicked());
-        if resp.clicked() && !held && !reference_pick {
+        let pen_idle = crate::tablet_input::pen() && app.tool.is_none() && app.dialog.is_none();
+        let pen_body = pen_idle && resp.double_clicked() && matches!(app.viewport.hover, Some(Hit::Face { .. }));
+        let pen_dimension = pen_idle
+            && resp.clicked()
+            && crate::dim_view::hit_text(p).is_some()
+            && !crate::dim_view::editing()
+            && crate::dim_view::double_click(app, p);
+        if pen_body && !held {
+            if let Some(Hit::Face { body, .. }) = app.viewport.hover.clone() {
+                let items = crate::selection::promote_body(&app.session.selection, &body);
+                let _ = app.run("select.set", json!({ "items": items }));
+            }
+        }
+        if resp.clicked() && !held && !reference_pick && !pen_body && !pen_dimension {
             if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p, mods.shift);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
@@ -2681,10 +2694,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         Some(id) => select(app, Some(Sel::SketchConstraint { id }), add, allow_toggle),
                         // Clicking again on the same spot selects the next thing under it (not
                         // the second click of a double-click, which has its own actions).
-                        None if !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
+                        None if !pen_idle && !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
                         None => {
                             let sel = cand.and_then(|c| c.1);
-                            select(app, sel.clone(), add, allow_toggle);
+                            select(app, sel.clone(), add || (pen_idle && sel.is_some()), allow_toggle || pen_idle);
                             crate::select_other::note_click(app, p, if add { None } else { sel });
                         }
                     }
@@ -2692,12 +2705,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
         // Double-click a dimension: edit its value in place.
-        let dim_edit = resp.double_clicked()
-            && !held
-            && !crate::dim_view::editing()
-            && app.tool.is_none()
-            && app.dialog.is_none()
-            && (crate::sketch_modify_ui::double_click_pattern(app, p) || crate::dim_view::double_click(app, p));
+        let dim_edit = pen_dimension
+            || resp.double_clicked()
+                && !held
+                && !crate::dim_view::editing()
+                && app.tool.is_none()
+                && app.dialog.is_none()
+                && (crate::sketch_modify_ui::double_click_pattern(app, p) || crate::dim_view::double_click(app, p));
         // Double-click a text (an outline or inside a letter; the first click selected it): edit it.
         if resp.double_clicked()
             && !held
@@ -3130,6 +3144,11 @@ fn paint_toast(ui: &egui::Ui, free: Rect, text: String, error: bool, computing: 
 /// When `add` is true but `toggle` is false (Shift add-only preference), picked items
 /// are only added.
 pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bool) {
+    let (add, toggle) = if crate::tablet_input::pen() && app.tool.is_none() && app.dialog.is_none() {
+        (sel.is_some(), !crate::tablet_input::action(crate::tablet_input::ADD))
+    } else {
+        (add, toggle)
+    };
     if !add {
         // A joint picked in the browser (highlighted even when hidden) lets go.
         app.tree.picked_joints.clear();
