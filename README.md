@@ -1,3 +1,9 @@
+## Download the pen/finger + keypad test APK
+
+[Download SolidCraft PenTouch Test APK (arm64, Android 9+)](https://github.com/thesuperced/solidcraftAndroid/raw/refs/heads/feat/android-pen-touch-keypad/artifacts/android/solidcraft-pentouch-test-a5681007-arm64.apk)
+
+Installs beside your original SolidCraft. [Build report, checksum and tablet testing details](artifacts/android/README.md).
+
 > **This is an Android fork.** Upstream is
 > [tangency-labs/solidcraft](https://github.com/tangency-labs/solidcraft); this fork adds a native
 > Android build for tablets (arm64, no browser/WebView) and the touch and pen input a tablet needs.
