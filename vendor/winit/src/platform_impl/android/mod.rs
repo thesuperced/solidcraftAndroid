@@ -6,10 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use android_activity::input::{InputEvent, KeyAction, Keycode, MotionAction, ToolType};
-
-/// True while the stylus (S Pen) is touching the glass, so the palm resting on it is ignored.
-static STYLUS_DOWN: AtomicBool = AtomicBool::new(false);
+use android_activity::input::{InputEvent, KeyAction, Keycode, MotionAction};
 use android_activity::{
     AndroidApp, AndroidAppWaker, ConfigurationRef, InputStatus, MainEvent, Rect,
 };
@@ -386,9 +383,6 @@ impl<T: 'static> EventLoop<T> {
                 // finger afterwards is mistaken for a palm and dropped.
                 if matches!(motion_event.action(), MotionAction::HoverMove | MotionAction::HoverEnter) {
                     if let Some(pointer) = motion_event.pointers().next() {
-                        if pointer.tool_type() == ToolType::Stylus {
-                            STYLUS_DOWN.store(false, Ordering::Relaxed);
-                        }
                         let position = PhysicalPosition { x: pointer.x() as _, y: pointer.y() as _ };
                         callback(
                             event::Event::WindowEvent {
@@ -401,21 +395,11 @@ impl<T: 'static> EventLoop<T> {
                     return InputStatus::Handled;
                 }
 
-                // A palm resting on the glass while the pen draws must not become a second finger
-                // (which would read as a pinch): ignore finger input until the pen lifts.
-                if matches!(motion_event.pointer_at_index(motion_event.pointer_index()).tool_type(), ToolType::Stylus) {
-                    match motion_event.action() {
-                        MotionAction::Down | MotionAction::PointerDown | MotionAction::Move => {
-                            STYLUS_DOWN.store(true, Ordering::Relaxed);
-                        }
-                        MotionAction::Up | MotionAction::PointerUp | MotionAction::Cancel => {
-                            STYLUS_DOWN.store(false, Ordering::Relaxed);
-                        }
-                        _ => {}
-                    }
-                } else if STYLUS_DOWN.load(Ordering::Relaxed) {
-                    return InputStatus::Handled;
-                }
+                // Do not globally suppress fingers while a stylus is down. Android reports the
+                // tool type per pointer, and the UI needs both streams for pen drawing plus
+                // finger camera navigation. Cancellation is forwarded below so the receiver can
+                // clear only the affected contact. A future typed side-channel can use the same
+                // per-pointer records without changing this event's stable pointer id.
 
                 let phase = match motion_event.action() {
                     MotionAction::Down | MotionAction::PointerDown => {
@@ -447,8 +431,12 @@ impl<T: 'static> EventLoop<T> {
                         let location =
                             PhysicalPosition { x: pointer.x() as _, y: pointer.y() as _ };
                         trace!(
-                            "Input event {device_id:?}, {phase:?}, loc={location:?}, \
-                             pointer={pointer:?}"
+                            "Input event {device_id:?}, {phase:?}, tool={:?}, loc={location:?}, \
+                             pointer_id={}, canceled={}, pressure={:.3}",
+                            pointer.tool_type(),
+                            pointer.pointer_id(),
+                            phase == event::TouchPhase::Cancelled,
+                            pointer.pressure()
                         );
                         let event = event::Event::WindowEvent {
                             window_id,

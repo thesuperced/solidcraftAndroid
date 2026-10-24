@@ -319,6 +319,9 @@ public final class SolidCraftActivity extends NativeActivity {
             imeView.setTextColor(0);
             imeView.setAlpha(0.01f);
             imeView.setSoundEffectsEnabled(false);
+            // SolidCraft supplies its own CAD keypad. Keep the system IME opt-in so focusing an
+            // egui TextEdit never unexpectedly resizes or covers the viewport.
+            imeView.setShowSoftInputOnFocus(false);
             imeView.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
             imeView.setImeOptions(EditorInfo.IME_FLAG_NO_FULLSCREEN);
             imeView.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);

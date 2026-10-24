@@ -267,7 +267,11 @@ impl eframe::App for Shell {
         let owner = if wanted { ctx.memory(|m| m.focused()) } else { None };
         if wanted != self.keyboard_wanted {
             self.keyboard_wanted = wanted;
-            ime_visibility(&self.app, wanted);
+            // CAD text fields use the in-app keypad. The Android IME remains hidden by
+            // default; this also prevents focus changes from repeatedly popping it up.
+            if !wanted {
+                ime_visibility(&self.app, false);
+            }
             self.ime.reset();
         } else if owner != self.keyboard_owner {
             self.ime.reset();
