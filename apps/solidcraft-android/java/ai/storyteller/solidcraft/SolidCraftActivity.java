@@ -57,6 +57,11 @@ import java.util.concurrent.Executors;
  * hand-edit it in the app checkout. Put persistent customizations in an adapter under adapters/.
  */
 public final class SolidCraftActivity extends NativeActivity {
+    public int cadInputConfig(int item) {
+        if (item == 0) return android.view.ViewConfiguration.get(this).getScaledTouchSlop();
+        if (item == 1) return android.view.ViewConfiguration.getLongPressTimeout();
+        return android.view.ViewConfiguration.getDoubleTapTimeout();
+    }
     private static final String TAG = "SolidCraftSAF";
     private static final int REQ_OPEN = 0x5043;
     private static final int REQ_SAVE = 0x5044;

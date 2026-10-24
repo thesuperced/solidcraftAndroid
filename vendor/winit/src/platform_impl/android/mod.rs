@@ -393,7 +393,10 @@ impl<T: 'static> EventLoop<T> {
                             position: [pointer.x(), pointer.y()], pressure: pointer.pressure(),
                             tilt: pointer.axis_value(Axis::Tilt), orientation: pointer.orientation(),
                             time_ns: motion_event.event_time(), buttons: motion_event.button_state().0, historical: false });
-                        if motion_event.action() == MotionAction::HoverExit { return InputStatus::Handled; }
+                        if motion_event.action() == MotionAction::HoverExit {
+                            callback(event::Event::WindowEvent { window_id, event: event::WindowEvent::CursorLeft { device_id } }, self.window_target());
+                            return InputStatus::Handled;
+                        }
                         let position = PhysicalPosition { x: pointer.x() as _, y: pointer.y() as _ };
                         callback(
                             event::Event::WindowEvent {

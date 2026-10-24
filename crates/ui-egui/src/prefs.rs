@@ -834,6 +834,9 @@ pub fn pan_sign_x(app: &SolveApp) -> f32 {
 
 /// Whether the configured suppress-snap chord is held.
 pub fn suppress_sketch_snap_held(app: &SolveApp, m: Modifiers) -> bool {
+    if crate::tablet_input::action(crate::tablet_input::NO_SNAP) {
+        return true;
+    }
     let c = app.preferences.suppress_sketch_snap;
     let held = crate::tool_modifiers::Held::from_modifiers(m);
     // Classic default (`CTRL_ALT`): Ctrl/Cmd **or** Alt/Option each suppress snap.
@@ -848,7 +851,7 @@ pub fn suppress_sketch_snap_held(app: &SolveApp, m: Modifiers) -> bool {
 pub fn manipulator_free_held(app: &SolveApp, m: Modifiers) -> bool {
     use crate::tool_modifiers::Held;
     let held = Held::from_modifiers(m);
-    held.primary || (app.preferences.manipulator_free_alt && held.alt)
+    held.primary || (app.preferences.manipulator_free_alt && held.alt) || crate::tablet_input::action(crate::tablet_input::FREE)
 }
 
 /// +1, or −1 when the wheel zooms the other way.

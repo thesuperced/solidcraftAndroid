@@ -61,6 +61,9 @@ pub struct ControlEvent {
     pub contact: Contact,
 }
 pub struct CadInputRouter {
+    event_count: u64,
+    cancel_count: u64,
+    history_count: u64,
     excluded: Vec<[f32; 4]>,
     last: Option<Contact>,
     region: Option<[f32; 4]>,
@@ -83,6 +86,9 @@ fn contains([x0, y0, x1, y1]: [f32; 4], [x, y]: [f32; 2]) -> bool {
 impl CadInputRouter {
     pub const fn new() -> Self {
         Self {
+            event_count: 0,
+            cancel_count: 0,
+            history_count: 0,
             excluded: Vec::new(),
             last: None,
             region: None,
@@ -97,7 +103,21 @@ impl CadInputRouter {
     pub fn owner(&self, device: i32, id: i32) -> Option<Owner> {
         self.owners.get(&(device, id)).copied()
     }
-    pub fn route(&mut self, event: Contact) -> bool {
+    pub fn route(&mut self, mut event: Contact) -> bool {
+        if event.position.iter().any(|value| !value.is_finite()) {
+            if matches!(event.source, Source::Stylus | Source::Eraser) {
+                cancel_pen();
+            }
+            event.phase = Phase::Cancel;
+            event.position = [0.0, 0.0];
+        }
+        self.event_count = self.event_count.saturating_add(1);
+        if event.phase == Phase::Cancel {
+            self.cancel_count = self.cancel_count.saturating_add(1);
+        }
+        if event.historical {
+            self.history_count = self.history_count.saturating_add(1);
+        }
         self.last = Some(event);
         if matches!(event.phase, Phase::Hover | Phase::Leave) {
             if event.source != Source::Finger {
@@ -107,6 +127,9 @@ impl CadInputRouter {
         }
         let key = (event.device, event.id);
         if event.phase == Phase::Down {
+            if self.owners.len() >= 128 && !self.owners.contains_key(&(event.device, event.id)) {
+                return true;
+            }
             let pen_down = self.owners.values().any(|o| *o == Owner::Modeling);
             let control = self.controls.iter().find(|(_, r)| contains(*r, event.position)).map(|(id, _)| *id);
             let viewport = self.region.is_some_and(|r| contains(r, event.position))
@@ -115,7 +138,7 @@ impl CadInputRouter {
             let owner = if let Some(id) = control {
                 Owner::Control(id)
             } else if !viewport {
-                Owner::Ui
+                if pen_down && event.source == Source::Finger { Owner::Control(254) } else { Owner::Ui }
             } else {
                 match event.source {
                     Source::Stylus | Source::Eraser => Owner::Modeling,
@@ -184,6 +207,25 @@ pub fn drain_controls() -> Vec<ControlEvent> {
 }
 pub fn pointer_source() -> Source {
     ROUTER.lock().map(|s| s.pointer_source).unwrap_or_default()
+}
+#[derive(Clone, Debug)]
+pub struct Diagnostics {
+    pub owners: Vec<(i32, i32, Owner)>,
+    pub region: Option<[f32; 4]>,
+    pub controls: Vec<(u8, [f32; 4])>,
+    pub events: u64,
+    pub canceled: u64,
+    pub historical: u64,
+}
+pub fn diagnostics() -> Option<Diagnostics> {
+    ROUTER.lock().ok().map(|s| Diagnostics {
+        owners: s.owners.iter().map(|(&(device, id), owner)| (device, id, *owner)).collect(),
+        region: s.region,
+        controls: s.controls.clone(),
+        events: s.event_count,
+        canceled: s.cancel_count,
+        historical: s.history_count,
+    })
 }
 pub fn exclude(regions: Vec<[f32; 4]>) {
     if let Ok(mut state) = ROUTER.lock() {
