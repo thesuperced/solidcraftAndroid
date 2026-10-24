@@ -314,6 +314,7 @@ impl eframe::App for Shell {
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        self.keypad.intercept_pointer(ctx, raw);
         self.keypad.restore_focus(ctx);
         if cad::take_pen_cancel() {
             // Cancel the active interaction before a canceled pen can be interpreted as a click.

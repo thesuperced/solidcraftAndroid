@@ -1,5 +1,5 @@
-//! Local CAD keypad. Button actions enter RawInput on the following frame.
-#[derive(serde::Serialize, serde::Deserialize)]
+//! Contextual CAD keypad. Captured taps enter RawInput without defocusing the editor.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Keypad {
     #[serde(skip)]
@@ -11,41 +11,17 @@ pub struct Keypad {
     pub pending: Vec<egui::Event>,
     #[serde(skip)]
     owner: Option<egui::Id>,
-    pub pinned: bool,
-    collapsed: bool,
-    opacity: f32,
-    order: Vec<String>,
-    selected: usize,
-    #[serde(skip)]
-    panel_rect: Option<egui::Rect>,
-    #[cfg(test)]
     #[serde(skip)]
     key_rects: std::collections::BTreeMap<String, egui::Rect>,
+    #[serde(skip)]
+    captured_key: Option<String>,
 }
 
-impl Default for Keypad {
-    fn default() -> Self {
-        Self {
-            shift: false,
-            ctrl: false,
-            abc: false,
-            pending: Vec::new(),
-            owner: None,
-            pinned: true,
-            collapsed: false,
-            opacity: 1.0,
-            order: Vec::new(),
-            selected: 0,
-            panel_rect: None,
-            #[cfg(test)]
-            key_rects: Default::default(),
-        }
-    }
-}
 impl Keypad {
     pub fn reset_focus(&mut self) {
         self.owner = None;
         self.pending.clear();
+        self.captured_key = None;
         self.shift = false;
         self.ctrl = false;
     }
@@ -60,6 +36,76 @@ impl Keypad {
         for pressed in [true, false] {
             self.pending.push(egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers });
         }
+    }
+    fn activate(&mut self, label: &str) {
+        let plain = egui::Modifiers::default();
+        let command = egui::Modifiers { ctrl: true, command: true, ..plain };
+        match label {
+            "123" => self.abc = false,
+            "ABC" => self.abc = true,
+            "Shift" => self.shift = !self.shift,
+            "Ctrl" => self.ctrl = !self.ctrl,
+            "Esc" => self.key(egui::Key::Escape, plain),
+            "Undo" => self.key(egui::Key::Z, command),
+            "Redo" => self.key(egui::Key::Z, egui::Modifiers { shift: true, ..command }),
+            "Clear" => {
+                self.key(egui::Key::A, command);
+                self.key(egui::Key::Backspace, plain);
+            }
+            "Backspace" => self.key(egui::Key::Backspace, plain),
+            "Delete" => self.key(egui::Key::Delete, plain),
+            "Enter" => self.key(egui::Key::Enter, plain),
+            "Tab" => self.key(egui::Key::Tab, plain),
+            text => self.pending.push(egui::Event::Text(if text == "Space" {
+                " ".into()
+            } else if self.shift && text.len() == 1 && text.is_ascii() {
+                text.to_uppercase()
+            } else {
+                text.into()
+            })),
+        }
+    }
+    /// Capture keypad pointer clicks before egui can treat them as clicks outside the active
+    /// editor. The key rectangles come from the preceding frame, when the keypad was painted.
+    pub fn intercept_pointer(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if self.owner.is_none() || !ctx.egui_wants_keyboard_input() {
+            self.captured_key = None;
+            return;
+        }
+        let mut kept = Vec::with_capacity(raw.events.len());
+        for event in raw.events.drain(..) {
+            let pointer = match &event {
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, .. } => Some((*pos, *pressed)),
+                _ => None,
+            };
+            let Some((pos, pressed)) = pointer else {
+                kept.push(event);
+                continue;
+            };
+            if pressed {
+                let hit = self.key_rects.iter().find(|(_, rect)| rect.contains(pos)).map(|(label, _)| label.clone());
+                if let Some(label) = hit {
+                    self.captured_key = Some(label);
+                    if let Some(owner) = self.owner {
+                        ctx.memory_mut(|m| m.request_focus(owner));
+                    }
+                    ctx.request_repaint();
+                    continue;
+                }
+            } else if let Some(label) = self.captured_key.take() {
+                // The floating window can shift by a few points as egui settles its size between
+                // frames. The press established the intended key, so complete that captured tap
+                // on release instead of re-hit-testing against a newly laid-out rectangle.
+                self.activate(&label);
+                if let Some(owner) = self.owner {
+                    ctx.memory_mut(|m| m.request_focus(owner));
+                }
+                ctx.request_repaint();
+                continue;
+            }
+            kept.push(event);
+        }
+        raw.events = kept;
     }
     pub fn input(&mut self, raw: &mut egui::RawInput, mut physical: egui::Modifiers) {
         physical.shift |= self.shift;
@@ -84,102 +130,49 @@ impl Keypad {
             self.owner = focused;
         }
         let wanted = ctx.egui_wants_keyboard_input();
-        if self.collapsed || (!self.pinned && !wanted) {
-            let panel = egui::Panel::left("android_cad_keypad_collapsed").exact_size(56.0).show(parent, |ui| {
-                if ui.button("CAD").clicked() {
-                    self.collapsed = false;
-                    self.pinned = true;
-                }
-            });
-            self.panel_rect = Some(panel.response.rect);
+        if !wanted {
+            self.owner = None;
+            self.captured_key = None;
+            self.key_rects.clear();
             return;
         }
-        if !wanted
-            && ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !self.panel_rect.is_some_and(|r| r.contains(p))))
-        {
-            self.owner = None;
-        }
         let mut clicked = false;
-        let panel = egui::Panel::left("android_cad_keypad").resizable(true).default_size(270.0).size_range(260.0..=500.0).show(parent, |ui| {
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.pinned, "Pin");
-                ui.checkbox(&mut self.collapsed, "Collapse");
-                ui.checkbox(&mut self.abc, "ABC");
-            });
-            ui.collapsing("Keypad settings", |ui| {
-                ui.add(egui::Slider::new(&mut self.opacity, 0.35..=1.0).text("Opacity"));
-                if !self.order.is_empty() {
-                    let max = self.order.len().saturating_sub(1);
-                    ui.add(egui::Slider::new(&mut self.selected, 0..=max).text("Key position"));
-                    if ui.button("Move selected key left").clicked() && self.selected > 0 && self.selected <= max {
-                        self.order.swap(self.selected, self.selected - 1);
-                        self.selected -= 1;
-                    }
-                    if ui.button("Reset layout").clicked() {
-                        self.order.clear();
-                    }
-                }
-            });
-            if self.collapsed || (!self.pinned && !wanted && self.owner.is_none()) {
-                return;
-            }
-            ui.set_opacity(if self.opacity.is_finite() { self.opacity.clamp(0.35, 1.0) } else { 1.0 });
-            let defaults: Vec<&str> = if self.abc {
-                "Shift Ctrl Esc Undo Redo a b c d e f g h i j k l m n o p q r s t u v w x y z _ / : Space Backspace Clear Enter Tab Delete"
-                    .split_whitespace()
-                    .collect()
-            } else {
-                "Shift Ctrl Esc Undo Redo 7 8 9 + Backspace 4 5 6 - Clear 1 2 3 . Enter 0 mm deg Tab Delete".split_whitespace().collect()
-            };
-            if !self.abc && (self.order.len() != defaults.len() || defaults.iter().any(|key| !self.order.iter().any(|saved| saved == key))) {
-                self.order = defaults.iter().map(|s| (*s).to_owned()).collect();
-            }
-            let labels: Vec<String> = if self.abc { defaults.iter().map(|s| (*s).to_owned()).collect() } else { self.order.clone() };
-            egui::Grid::new("cad_keys").num_columns(5).spacing([3.0, 6.0]).show(ui, |ui| {
-                for (index, label) in labels.iter().enumerate() {
-                    let active = (label == "Shift" && self.shift) || (label == "Ctrl" && self.ctrl);
-                    let display = match label.as_str() {
-                        "Backspace" => "Bksp",
-                        "Delete" => "Del",
-                        other => other,
-                    };
-                    let response = ui.add_sized([46.0, 44.0], egui::Button::new(display).selected(active));
-                    #[cfg(test)]
-                    self.key_rects.insert(label.clone(), response.rect);
-                    if response.clicked() {
-                        clicked = true;
-                        let plain = egui::Modifiers::default();
-                        let command = egui::Modifiers { ctrl: true, command: true, ..plain };
-                        match label.as_str() {
-                            "Shift" => self.shift = !self.shift,
-                            "Ctrl" => self.ctrl = !self.ctrl,
-                            "Esc" => self.key(egui::Key::Escape, plain),
-                            "Undo" => self.key(egui::Key::Z, command),
-                            "Redo" => self.key(egui::Key::Z, egui::Modifiers { shift: true, ..command }),
-                            "Clear" => {
-                                self.key(egui::Key::A, command);
-                                self.key(egui::Key::Backspace, plain);
-                            }
-                            "Backspace" => self.key(egui::Key::Backspace, plain),
-                            "Delete" => self.key(egui::Key::Delete, plain),
-                            "Enter" => self.key(egui::Key::Enter, plain),
-                            "Tab" => self.key(egui::Key::Tab, plain),
-                            text => self.pending.push(egui::Event::Text(if text == "Space" {
-                                " ".into()
-                            } else if self.shift && text.len() == 1 && text.is_ascii() {
-                                text.to_uppercase()
-                            } else {
-                                text.into()
-                            })),
+        egui::Window::new("Value input")
+            .id(egui::Id::new("android_value_keypad"))
+            .anchor(egui::Align2::RIGHT_CENTER, [-16.0, 0.0])
+            .resizable(false)
+            .collapsible(false)
+            .title_bar(false)
+            .show(&ctx, |ui| {
+                let defaults: Vec<&str> = if self.abc {
+                    "a b c d e f g h i j k l m n o p q r s t u v w x y z _ / : Space 123 Backspace Clear Esc Enter".split_whitespace().collect()
+                } else {
+                    "7 8 9 / Backspace 4 5 6 * Clear 1 2 3 - mm 0 . + deg Enter Esc Undo Redo Delete ABC".split_whitespace().collect()
+                };
+                let labels: Vec<String> = defaults.iter().map(|s| (*s).to_owned()).collect();
+                self.key_rects.clear();
+                egui::Grid::new("cad_keys").num_columns(5).spacing([3.0, 6.0]).show(ui, |ui| {
+                    for (index, label) in labels.iter().enumerate() {
+                        let active = (label == "Shift" && self.shift) || (label == "Ctrl" && self.ctrl) || self.captured_key.as_ref() == Some(label);
+                        let display = match label.as_str() {
+                            "Backspace" => "Bksp",
+                            "Delete" => "Del",
+                            "Enter" => "✓",
+                            "Esc" => "✕",
+                            other => other,
+                        };
+                        let response = ui.add_sized([46.0, 44.0], egui::Button::new(display).selected(active));
+                        self.key_rects.insert(label.clone(), response.rect);
+                        if response.clicked() {
+                            clicked = true;
+                            self.activate(label);
+                        }
+                        if index % 5 == 4 {
+                            ui.end_row();
                         }
                     }
-                    if index % 5 == 4 {
-                        ui.end_row();
-                    }
-                }
+                });
             });
-        });
-        self.panel_rect = Some(panel.response.rect);
         if clicked {
             if let Some(owner) = self.owner {
                 ctx.memory_mut(|m| m.request_focus(owner));
@@ -205,8 +198,10 @@ mod tests {
                 events,
                 ..Default::default()
             };
+            pad.intercept_pointer(&ctx, &mut raw);
             pad.restore_focus(&ctx);
             pad.input(&mut raw, egui::Modifiers::default());
+            let delivered = raw.events.clone();
             let mut output = ctx.run_ui(raw, |ui| {
                 pad.show(ui);
                 let response = ui.add(egui::TextEdit::singleline(value).id(field));
@@ -215,23 +210,35 @@ mod tests {
                 }
             });
             output.textures_delta.clear();
+            delivered
         };
-        frame(&mut pad, &mut value, Vec::new(), true);
+        let _ = frame(&mut pad, &mut value, Vec::new(), true);
         pad.key(egui::Key::A, egui::Modifiers { ctrl: true, command: true, ..Default::default() });
-        frame(&mut pad, &mut value, Vec::new(), false);
+        let _ = frame(&mut pad, &mut value, Vec::new(), false);
         let pos = pad.key_rects.get("7").unwrap().center();
-        for pressed in [true, false] {
-            frame(
-                &mut pad,
-                &mut value,
-                vec![
-                    egui::Event::PointerMoved(pos),
-                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() },
-                ],
-                false,
-            );
-        }
-        frame(&mut pad, &mut value, Vec::new(), false);
+        let _ = frame(
+            &mut pad,
+            &mut value,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+            ],
+            false,
+        );
+        assert_eq!(pad.captured_key.as_deref(), Some("7"));
+        assert_eq!(ctx.memory(|m| m.focused()), Some(field));
+        let delivered = frame(
+            &mut pad,
+            &mut value,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+            ],
+            false,
+        );
+        assert!(pad.captured_key.is_none());
+        assert!(delivered.iter().any(|event| matches!(event, egui::Event::Text(text) if text == "7")));
+        let _ = frame(&mut pad, &mut value, Vec::new(), false);
         assert_eq!(value, "7");
         assert_eq!(ctx.memory(|m| m.focused()), Some(field));
     }
