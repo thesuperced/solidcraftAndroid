@@ -12,10 +12,10 @@ if (-not $Serial) {
     $Serial = $devices[0]
 }
 
-$apk = Join-Path $env:USERPROFILE "Downloads\solidcraft-control-panel-arm64.apk"
-$url = "https://github.com/thesuperced/solidcraftAndroid/raw/refs/heads/feat/android-pen-touch-keypad/artifacts/android/solidcraft-control-panel-arm64.apk"
+$apk = Join-Path $env:USERPROFILE "Downloads\solidcraft-sketch-corners-arm64.apk"
+$url = "https://raw.githubusercontent.com/thesuperced/solidcraftAndroid/feat/android-pen-touch-keypad/artifacts/android/solidcraft-sketch-corners-arm64.apk"
 Invoke-WebRequest -Uri $url -OutFile $apk
-$expected = "26e3a7ecd4aee4454af5a0543c07daf15b7f6e334a697bfd3796ee399cffa7a2"
+$expected = "6cc1f3cb9b1fd0ed7f39c587760024f99166440beb4e180f2d2d2a7be37c0ba2"
 if ((Get-FileHash -Algorithm SHA256 $apk).Hash -ine $expected) { throw "APK checksum mismatch; installation stopped." }
 
 function Invoke-Adb {

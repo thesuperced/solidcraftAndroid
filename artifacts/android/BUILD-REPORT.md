@@ -1,4 +1,36 @@
-# Latest: control-panel Android test APK — 2026-10-25
+# Latest: sketch-corners and tablet-controls APK — 2026-10-25
+
+Source: `008e46c7ac55d93d093365b6a14c1a951af73190`.
+Artifact: `solidcraft-sketch-corners-arm64.apk` (~38 MiB).
+SHA-256: `6cc1f3cb9b1fd0ed7f39c587760024f99166440beb4e180f2d2d2a7be37c0ba2`.
+Same package `ai.storyteller.solidcraft.pentouch`, version 0.18.3, ARM64,
+minSdk 28 and targetSdk 35. Signing certificate SHA-256 is unchanged:
+`6b2d3043a7bd55a83b0300fcd708d829ef3d43f3d2e1eac30428b18756e76223`.
+
+Implemented: three-finger tap invokes the shared configured middle-double-click
+action; nine persisted QP slots with migration; split outer Hide / inner dock
+arrow; reordered panel without CTRL or bottom Hide; fixed lower-right keypad
+with captured pen drag handle; cleaned numeric keys and ASCII cancel/commit;
+orange, thicker sketch-selection feedback; experimental TAB entry/cycling of
+line Length and Angle; atomic multi-corner Fillet and all Chamfer variants.
+
+Passed: 8 native router/camera/gesture tests, 15 shared interaction tests, 6 keypad
+tests, strict keypad Clippy, formatting, all 12 wasm checks and Android ARM64 build.
+Shared tests apply each of the four sketch corner variants to all rectangle sides,
+verify failed batches leave no edit, and restore the original with one Undo. They
+also exercise TAB from the canvas, panel order and seven-to-nine-slot migration.
+Keypad tests include pen dragging without typing or losing field focus. The actual
+nine-slot panel was rendered offscreen through egui/WGPU and visually inspected.
+APK checks pass for stored/aligned resources.arsc, 16 KB ZIP alignment, v3 signature,
+certificate, launcher, package, SDKs and ABI.
+
+Full CI still stops at inherited launcher/vendor asset-attribution errors. There
+is no direct USB connection to the user's Windows PC in this workspace. Actual
+device input, installation and lifecycle testing remain pending. No additional
+Samsung settings or application-data deletion are required.
+See [tablet acceptance steps](../../docs/android-sketch-corners-testing.md).
+
+# Previous: control-panel Android test APK — 2026-10-25
 
 Source: `1ccbbd2caa90f26226eb615b98c644fcb8299bb4`.
 Artifact: `solidcraft-control-panel-arm64.apk` (~38 MiB).
