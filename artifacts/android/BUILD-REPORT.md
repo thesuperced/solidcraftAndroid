@@ -1,4 +1,34 @@
-# Latest: pen-first Android test APK
+# Latest: control-panel Android test APK — 2026-10-25
+
+Source: `1ccbbd2caa90f26226eb615b98c644fcb8299bb4`.
+Artifact: `solidcraft-control-panel-arm64.apk` (~38 MiB).
+SHA-256: `26e3a7ecd4aee4454af5a0543c07daf15b7f6e334a697bfd3796ee399cffa7a2`.
+Same package, version 0.18.3, ARM64, minSdk 28 and targetSdk 35 as the previous
+test build. Certificate SHA-256 remains
+`6b2d3043a7bd55a83b0300fcd708d829ef3d43f3d2e1eac30428b18756e76223`.
+
+Implemented the approved tablet feedback: functional control column, held CTRL
+toggle semantics, sketch filter reset, seven persisted QP shortcuts, pen drag/dock,
+hide/restore, Cancel/Finish/Tab/Delete/Undo/Redo, and German ABC input. Removed the
+old semantic dock and floating contextual action buttons. The native router accepts
+delivered camera contacts during pen contact for this first test, while panel
+contacts retain independent ownership. Explicit Cancel rolls back the current pen
+transaction and suppresses its remaining contact until release.
+
+Validation: 7 native router/camera tests, 13 shared interaction tests, 6 keypad
+tests, strict keypad Clippy, workspace formatting, all 12 wasm builds and Android
+ARM64 build passed. The actual panel was rendered with egui/WGPU for visual review.
+Packaging verifies stored/aligned resources.arsc, 16 KB ZIP alignment, v3 signature,
+launcher, package, SDKs and ABI. Full CI stops at the inherited missing attribution
+rows for launcher assets and vendored Winit examples/docs; it is not a full CI pass.
+
+This cloud workspace has no USB connection to the user's Windows PC. Physical
+S Pen/finger delivery, installation, rotation/resume and save/reopen acceptance
+remain pending. No claims of passing hardware tests. The older instrumentation
+APK below is retained from the preceding build, not newly run for this revision.
+See [device test steps](../../docs/android-control-panel-testing.md).
+
+# Previous: pen-first Android test APK
 
 Source commit: `bf64ff30d924cae8fb30db92b1a1d1fb6340fbef` (six implementation milestones).
 App: `solidcraft-pen-first-arm64.apk` (~38 MiB).

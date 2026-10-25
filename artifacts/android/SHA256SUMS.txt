@@ -1,2 +1,3 @@
+26e3a7ecd4aee4454af5a0543c07daf15b7f6e334a697bfd3796ee399cffa7a2  solidcraft-control-panel-arm64.apk
 837f5965173128de3d47a0e50349771e105b9f0692127966ea3c7d1c81e7bfdd  solidcraft-pen-first-arm64.apk
 bd6a81553f4ec7e18778947d46349fa028bb297412ecb9287e64bd3ce31070eb  solidcraft-input-instrumentation.apk

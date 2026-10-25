@@ -1,18 +1,27 @@
-# Android test APK
+# Android control-panel test APK
 
-Download [SolidCraft PenTouch Test APK — pen-first selection and controls](https://github.com/thesuperced/solidcraftAndroid/raw/refs/heads/feat/android-pen-touch-keypad/artifacts/android/solidcraft-pen-first-arm64.apk).
+Download [SolidCraft PenTouch Test — new control panel](https://github.com/thesuperced/solidcraftAndroid/raw/refs/heads/feat/android-pen-touch-keypad/artifacts/android/solidcraft-control-panel-arm64.apk).
 
-Arm64 Android 9 or newer. Installs beside the original SolidCraft as **SolidCraft PenTouch Test**.
+Arm64 Android 9 or newer, approximately 38 MiB. Source commit:
+`1ccbbd2caa90f26226eb615b98c644fcb8299bb4`.
+SHA-256: `26e3a7ecd4aee4454af5a0543c07daf15b7f6e334a697bfd3796ee399cffa7a2`.
 
-Built from source commit `bf64ff30d924cae8fb30db92b1a1d1fb6340fbef`.
-SHA-256: `837f5965173128de3d47a0e50349771e105b9f0692127966ea3c7d1c81e7bfdd`.
+This revision replaces the old modifier dock with arrow / CTRL / Cancel / TAB /
+Delete / QP / Redo / Undo / Hide / Finish. It includes pen-dragged placement,
+left/right docking, a restore tab, seven saved shortcut slots, selection toggle
+fixes, context-aware filter reset and German ABC keys `äöüÄÖÜ`.
+[Full behaviour and tablet acceptance checklist](../../docs/android-control-panel-testing.md).
 
-The APK is approximately 38 MiB and is stored directly on this branch. Its native library is compressed for download and extracted by Android on installation. The resource table (`resources.arsc`) is **uncompressed and 4-byte aligned**, as required for Android 11+ installation. The previous download mistakenly compressed that table and has been replaced. Native code, manifest, Java bytecode and resource contents match the original test build. Signing and packaging checks pass; installation on your physical tablet still needs confirmation.
+Use the [Windows updater](../../tools/android/update-tablet.ps1): download, SHA-256
+check, force-stop, `install -r`, launch. The package ID and signing certificate
+match the previously installed test build. Do not uninstall.
 
-This is a debug-signed experimental APK awaiting tablet testing. See [the test script](../../docs/android-pen-touch-keypad.md).
+Passed: 7 native routing/camera tests, 13 shared interaction tests, 6 keypad tests,
+strict keypad Clippy, formatting, all 12 WebAssembly checks, ARM64 build and APK
+resource storage/alignment/signature/manifest checks. The actual panel was rendered
+offscreen and inspected. Full CI still stops at inherited missing asset attributions.
 
-This build keeps the accepted immediate one-finger orbit and coalesced two-finger pan/pinch behavior. The permanent left keypad is replaced by a compact floating keypad that appears only while a value/text editor is active. Key touches are captured before the canvas sees them, so they keep the field focused and deliver the selected value; ✓ commits and ✕ cancels.
-
-New: pen add/toggle selection, double-tap body promotion, hold-to-box and overlap picking, off-hand box filters, semantic modifier dock, shared sketch/gizmo/undo paths, and gesture rollback. The keypad sits beside its field. [Validation and remaining device checks](../../docs/android-pen-first-validation.md).
-
-Update on Windows with [update-tablet.ps1](../../tools/android/update-tablet.ps1): downloads the APK, checks SHA-256, force-stops the app, installs with `-r`, and launches it. The signing key and package ID match the previous test build; uninstalling is unnecessary.
+Real S Pen/finger concurrency and installation remain for tablet verification.
+This test build allows delivered finger-camera movement during pen contact as
+approved; final simultaneous-camera suppression is deferred. No Samsung settings
+are changed. Earlier APKs are retained as recovery options.
