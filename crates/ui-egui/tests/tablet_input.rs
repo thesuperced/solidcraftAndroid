@@ -161,6 +161,9 @@ fn panel_drag_dock_hide_restore_and_shortcut_preferences() {
     };
     draw(&mut dock);
     let regions = draw(&mut dock);
+    assert!(!regions.iter().any(|(id, _)| *id == 0), "CTRL was removed");
+    let order: Vec<_> = regions.iter().filter(|(id, _)| matches!(*id, 21..=23 | 25..=27 | 29)).map(|(id, _)| *id).collect();
+    assert_eq!(order, vec![22, 21, 29, 23, 25, 26, 27]);
     let arrow = regions.iter().find(|(id, _)| *id == 20).unwrap().1.center();
     let at = [arrow.x, arrow.y];
     dock.contact(1, 7, 20, true, false, at, 0.0, 0.5, 8.0);
@@ -188,6 +191,62 @@ fn panel_drag_dock_hide_restore_and_shortcut_preferences() {
     assert_eq!(restored.shortcuts[0], "M");
     assert!(restored.right);
     assert_eq!(restored.actions(), [false; 7]);
+    let migrated: Dock = serde_json::from_value(json!({"shortcuts":["M","E","L","R","C","D","F"]})).unwrap();
+    assert_eq!(migrated.shortcuts.len(), 9);
+    assert_eq!(migrated.shortcuts[6], "F");
+    assert!(migrated.shortcuts[7].is_empty() && migrated.shortcuts[8].is_empty());
+}
+
+#[test]
+fn selected_sketch_lines_apply_all_corners_in_one_undo_step() {
+    use solidcraft_ui_egui::{
+        dialogs::{Kind, apply_commands},
+        sketch_modify_ui::Mod,
+    };
+    for command in ["sketch.fillet", "sketch.chamfer.equal_distance", "sketch.chamfer.two_distance", "sketch.chamfer.distance_angle"] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[10,10],"p1":[50,40]})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        let ids: Vec<_> = h.app.session.doc.sketch(sid).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+        h.app.session.selection = ids.into_iter().map(|id| Sel::SketchCurve { id }).collect();
+        h.app.start(command);
+        let mut dialog = h.app.dialog.take().unwrap();
+        if let Kind::SketchModify(Mod::Corner { size, distance2, angle, .. }) = &mut dialog.kind {
+            *size = "1".into();
+            *distance2 = "2".into();
+            *angle = "45".into();
+        }
+        let commands = apply_commands(&h.app, &dialog).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].1["corners"].as_array().unwrap().len(), 4);
+        let before = h.app.session.doc.to_json();
+        let mut invalid = commands[0].1.clone();
+        invalid["corners"] = json!([invalid["corners"][0], {"a":"missing","b":"missing"}]);
+        assert!(h.app.run(&commands[0].0, invalid).is_err());
+        assert_eq!(h.app.session.doc.to_json(), before, "failed batch must not leave the first cut behind");
+        let result = h.app.run(&commands[0].0, commands[0].1.clone()).unwrap();
+        assert_eq!(result["curves"].as_array().unwrap().len(), 4, "{command}");
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), before, "all corners are one undo step");
+    }
+}
+
+#[test]
+fn tablet_tab_enters_length_then_cycles_to_angle() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.settle();
+    let _tablet = Tablet::pen();
+    h.app.start("sketch.line");
+    h.step(&json!({"click":{"sketch":[5,5]}})).unwrap();
+    h.step(&json!({"move":{"sketch":[25,15]}})).unwrap();
+    h.ctx.memory_mut(|m| m.surrender_focus(egui::Id::new(("sc_dim", 0_usize))));
+    h.frames(2);
+    for expected in [0_usize, 1, 0] {
+        h.step(&json!({"key":"Tab"})).unwrap();
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new(("sc_dim", expected))));
+    }
 }
 
 #[test]
@@ -267,9 +326,9 @@ fn off_hand_ctrl_holds_are_independent_and_release_never_latches() {
     let mut d = Dock::default();
     d.contact(1, 55, 0, true, false, [0.0; 2], 1.0, 0.5, 8.0);
     d.contact(1, 8, 0, true, false, [0.0; 2], 1.1, 0.5, 8.0);
-    assert!(d.actions()[tablet::ADD]);
+    assert!(!d.actions()[tablet::ADD]);
     d.contact(1, 55, 0, false, true, [0.0; 2], 1.15, 0.5, 8.0);
-    assert!(d.actions()[tablet::ADD]);
+    assert!(!d.actions()[tablet::ADD]);
     d.contact(1, 8, 0, false, false, [0.0; 2], 1.2, 0.5, 8.0);
     assert!(!d.actions()[tablet::ADD], "short Ctrl taps must not leave Ctrl stuck");
     d.reset();

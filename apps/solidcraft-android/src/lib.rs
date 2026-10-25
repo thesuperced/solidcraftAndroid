@@ -298,6 +298,7 @@ impl eframe::App for Shell {
             );
         }
         let mut queued = Vec::new();
+        self.gestures.tap_slop = self.input_config[0] as f32;
         for contact in winit::platform::android::cad::drain() {
             self.input_trace = format!("{:?} {}:{} {:?} Viewport", contact.source, contact.device, contact.id, contact.phase);
             if let Some((delta, pan, zoom)) = self.gestures.event(contact) {
@@ -309,6 +310,9 @@ impl eframe::App for Shell {
         let anchor = self.gestures.anchor().map(|[x, y]| [x / scale, y / scale]);
         for (delta, pan, zoom) in finger_gestures::coalesce(queued) {
             solidcraft_ui_egui::navigation::tablet_motion(&mut self.solve, [delta[0] / scale, delta[1] / scale], pan, zoom, anchor);
+        }
+        if self.gestures.take_three_tap() {
+            solidcraft_ui_egui::navigation::tablet_middle_double_click(&mut self.solve);
         }
         self.input_trace.push_str(&format!(" contacts={}", self.gestures.contact_count()));
         self.solve.logic(ctx);
@@ -395,6 +399,7 @@ impl eframe::App for Shell {
         {
             self.pen_transaction.begin(&mut self.solve);
         }
+        self.keypad.pen = tablet_input::pen();
         self.keypad.intercept_pointer(ctx, raw);
         self.keypad.restore_focus(ctx);
         if cad::take_pen_cancel() {
@@ -431,7 +436,7 @@ impl eframe::App for Shell {
         for action in self.dock.take_actions() {
             match action {
                 22 | 23 => raw.events.extend(tablet_input::key_events(if action == 22 { "Tab" } else { "Delete" }).unwrap_or_default()),
-                40..=46 => {
+                40..=48 => {
                     if let Some(shortcut) = self.dock.shortcuts.get((action - 40) as usize) {
                         if let Some(events) = tablet_input::key_events(shortcut) {
                             // Explicit shortcut modifiers belong to this command, independent of held CTRL.

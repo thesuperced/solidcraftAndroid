@@ -922,6 +922,11 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
     if !go {
         return;
     }
+    tablet_middle_double_click(app);
+}
+
+/// Touch gestures share the exact configured middle-double-click action.
+pub fn tablet_middle_double_click(app: &mut SolveApp) {
     match crate::prefs::MiddleDoubleClick::of(app) {
         crate::prefs::MiddleDoubleClick::Home => app.animate_view("home"),
         crate::prefs::MiddleDoubleClick::Fit => app.animate_fit_all(),

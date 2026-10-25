@@ -188,7 +188,8 @@ pub struct Dock {
     position: Option<[f32; 2]>,
     hidden: bool,
     quick_open: bool,
-    pub shortcuts: [String; 7],
+    #[serde(deserialize_with = "read_shortcuts")]
+    pub shortcuts: [String; 9],
     #[serde(skip)]
     editing: bool,
     #[serde(skip)]
@@ -201,6 +202,15 @@ pub struct Dock {
     dragging: bool,
     #[serde(skip)]
     panel_origin: [f32; 2],
+}
+fn read_shortcuts<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<[String; 9], D::Error> {
+    // Preserve the seven assignments from older builds and append two empty slots.
+    let values = <Vec<String> as serde::Deserialize>::deserialize(deserializer)?;
+    let mut slots = std::array::from_fn(|_| String::new());
+    for (slot, value) in slots.iter_mut().zip(values) {
+        *slot = value;
+    }
+    Ok(slots)
 }
 impl Dock {
     pub fn reset(&mut self) {
@@ -218,7 +228,8 @@ impl Dock {
     }
     pub fn actions(&self) -> [bool; 7] {
         let mut active = [false; 7];
-        active[ADD] = self.held.values().any(|(id, _, _)| *id == 0);
+        // Pen tap selection is sufficient; no CTRL button is exposed.
+        active[ADD] = false;
         active
     }
     pub fn take_actions(&mut self) -> Vec<u8> {
@@ -234,7 +245,7 @@ impl Dock {
             25 => self.quick_open = !self.quick_open,
             28 => self.hidden = true,
             30 => self.hidden = false,
-            47 => self.editing = !self.editing,
+            49 => self.editing = !self.editing,
             10..=15 => {
                 if let Some(filter) = id.checked_sub(10).and_then(|i| Filter::ALL.get(i as usize)) {
                     self.filter = *filter;
@@ -275,7 +286,7 @@ impl Dock {
                 return;
             }
             if now >= start && (at[0] - origin[0]).hypot(at[1] - origin[1]) <= slop {
-                if (40..=46).contains(&id) && now - start >= hold {
+                if (40..=48).contains(&id) && now - start >= hold {
                     self.editing = true;
                 } else {
                     self.activate(id);
@@ -300,7 +311,7 @@ impl Dock {
             }
             return regions;
         }
-        let height = 9.0 * 44.0 + 22.0 + 48.0;
+        let height = 7.0 * 44.0 + 22.0 + 42.0;
         let extra_width = if self.quick_open { 104.0 } else { 0.0 } + if selecting_box { 104.0 } else { 0.0 };
         let default =
             egui::pos2(if self.right { screen.right() - 110.0 } else { screen.left() + 12.0 }, (screen.center().y - height * 0.5).max(screen.top()));
@@ -313,20 +324,29 @@ impl Dock {
         let mut clicked = Vec::new();
         let out = egui::Area::new(egui::Id::new("tablet_semantic_dock")).fixed_pos(p).order(egui::Order::Foreground).show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
-                for (id, label, h) in [
-                    (20, if self.right { "←" } else { "→" }, 22.0),
-                    (0, "CTRL", 44.0),
-                    (21, "Cancel", 44.0),
-                    (22, "TAB", 44.0),
-                    (23, "Delete", 44.0),
-                    (25, "QP", 44.0),
-                    (26, "Redo", 44.0),
-                    (27, "Undo", 44.0),
-                    (28, "Hide", 44.0),
-                    (29, "Finish", 44.0),
-                ] {
-                    let r =
-                        ui.add_sized([82.0, h], egui::Button::new(label).selected((id == 0 && self.actions()[ADD]) || (id == 25 && self.quick_open)));
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    let hide = |ui: &mut egui::Ui, regions: &mut Vec<(u8, egui::Rect)>, clicked: &mut Vec<u8>| {
+                        let r = ui.add_sized([40.0, 22.0], egui::Button::new("X"));
+                        regions.push((28, r.rect));
+                        if r.clicked() {
+                            clicked.push(28);
+                        }
+                    };
+                    if !self.right {
+                        hide(ui, &mut regions, &mut clicked);
+                    }
+                    let r = ui.add_sized([40.0, 22.0], egui::Button::new(if self.right { "←" } else { "→" }));
+                    regions.push((20, r.rect));
+                    if r.clicked() {
+                        clicked.push(20);
+                    }
+                    if self.right {
+                        hide(ui, &mut regions, &mut clicked);
+                    }
+                });
+                for (id, label) in [(22, "TAB"), (21, "Cancel"), (29, "Finish"), (23, "Delete"), (25, "QP"), (26, "Redo"), (27, "Undo")] {
+                    let r = ui.add_sized([82.0, 44.0], egui::Button::new(label).selected(id == 25 && self.quick_open));
                     regions.push((id, r.rect));
                     if r.clicked() {
                         clicked.push(id);
@@ -350,9 +370,9 @@ impl Dock {
                         }
                     }
                     let r = ui.add_sized([82.0, 32.0], egui::Button::new("Edit slots"));
-                    regions.push((47, r.rect));
+                    regions.push((49, r.rect));
                     if r.clicked() {
-                        clicked.push(47);
+                        clicked.push(49);
                     }
                 });
             });

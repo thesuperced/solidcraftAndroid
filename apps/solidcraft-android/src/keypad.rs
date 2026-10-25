@@ -7,6 +7,13 @@ pub struct Keypad {
     #[serde(skip)]
     pub ctrl: bool,
     abc: bool,
+    position: Option<[f32; 2]>,
+    #[serde(skip)]
+    pub pen: bool,
+    #[serde(skip)]
+    drawn_position: egui::Pos2,
+    #[serde(skip)]
+    drag_base: egui::Pos2,
     #[serde(skip)]
     pub pending: Vec<egui::Event>,
     #[serde(skip)]
@@ -76,6 +83,16 @@ impl Keypad {
         }
         let mut kept = Vec::with_capacity(raw.events.len());
         for event in raw.events.drain(..) {
+            if let egui::Event::PointerMoved(pos) = &event
+                && self.captured_key.as_deref() == Some("__move")
+            {
+                if self.pen {
+                    let at = self.drag_base + (*pos - self.capture_origin);
+                    self.position = Some([at.x, at.y]);
+                }
+                ctx.request_repaint();
+                continue;
+            }
             let pointer = match &event {
                 egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, .. } => Some((*pos, *pressed)),
                 _ => None,
@@ -89,6 +106,7 @@ impl Keypad {
                 if let Some(label) = hit {
                     self.captured_key = Some(label);
                     self.capture_origin = pos;
+                    self.drag_base = self.drawn_position;
                     if let Some(owner) = self.owner {
                         ctx.memory_mut(|m| m.request_focus(owner));
                     }
@@ -99,7 +117,7 @@ impl Keypad {
                 // The floating window can shift by a few points as egui settles its size between
                 // frames. The press established the intended key, so complete that captured tap
                 // on release instead of re-hit-testing against a newly laid-out rectangle.
-                if pos.distance(self.capture_origin) <= ctx.options(|o| o.input_options.max_click_dist).max(8.0) {
+                if label != "__move" && pos.distance(self.capture_origin) <= ctx.options(|o| o.input_options.max_click_dist).max(8.0) {
                     self.activate(&label);
                 }
                 if let Some(owner) = self.owner {
@@ -143,15 +161,15 @@ impl Keypad {
         }
         let mut clicked = false;
         let screen = ctx.content_rect();
-        let field = self.owner.and_then(|id| ctx.read_response(id)).map(|r| r.rect);
         let width = 260.0;
-        let height = if self.abc { 430.0 } else { 280.0 };
-        let field = field.unwrap_or_else(|| egui::Rect::from_center_size(screen.center(), egui::vec2(72.0, 24.0)));
-        let x = if field.right() + width + 12.0 < screen.right() { field.right() + 8.0 } else { field.left() - width - 8.0 };
+        let height = if self.abc { 444.0 } else { 244.0 };
+        let default = egui::pos2(screen.right() - width - 12.0, screen.bottom() - height - 12.0);
+        let at = self.position.map(|p| egui::pos2(p[0], p[1])).unwrap_or(default);
         let position = egui::pos2(
-            x.clamp(screen.left(), (screen.right() - width).max(screen.left())),
-            field.top().clamp(screen.top(), (screen.bottom() - height).max(screen.top())),
+            at.x.clamp(screen.left(), (screen.right() - width).max(screen.left())),
+            at.y.clamp(screen.top(), (screen.bottom() - height).max(screen.top())),
         );
+        self.drawn_position = position;
         egui::Window::new("Value input")
             .id(egui::Id::new("android_value_keypad"))
             .fixed_pos(position)
@@ -159,23 +177,33 @@ impl Keypad {
             .collapsible(false)
             .title_bar(false)
             .show(&ctx, |ui| {
+                self.key_rects.clear();
+                ui.horizontal(|ui| {
+                    let r = ui.add_sized([194.0, 22.0], egui::Button::new("Move keypad"));
+                    self.key_rects.insert("__move".into(), r.rect);
+                    let r = ui.add_sized([46.0, 22.0], egui::Button::new("X"));
+                    self.key_rects.insert("Esc".into(), r.rect);
+                    if r.clicked() {
+                        clicked = true;
+                        self.activate("Esc");
+                    }
+                });
                 let defaults: Vec<&str> = if self.abc {
-                    "a b c d e f g h i j k l m n o p q r s t u v w x y z ä ö ü _ / : Space Shift 123 Backspace Clear Esc Enter"
+                    "a b c d e f g h i j k l m n o p q r s t u v w x y z ä ö ü _ / : Space Shift 123 Backspace Clear Enter"
                         .split_whitespace()
                         .collect()
                 } else {
-                    "7 8 9 / Backspace 4 5 6 * Clear 1 2 3 - mm 0 . + deg Enter Esc Undo Redo Delete ABC".split_whitespace().collect()
+                    "7 8 9 / Backspace 4 5 6 * Clear 1 2 3 - mm 0 . + Enter ABC".split_whitespace().collect()
                 };
                 let labels: Vec<String> = defaults.iter().map(|s| (*s).to_owned()).collect();
-                self.key_rects.clear();
                 egui::Grid::new("cad_keys").num_columns(5).spacing([3.0, 6.0]).show(ui, |ui| {
                     for (index, label) in labels.iter().enumerate() {
                         let active = (label == "Shift" && self.shift) || (label == "Ctrl" && self.ctrl) || self.captured_key.as_ref() == Some(label);
                         let display = match label.as_str() {
                             "Backspace" => "Bksp",
                             "Delete" => "Del",
-                            "Enter" => "✓",
-                            "Esc" => "✕",
+                            "Enter" => "OK",
+                            "Esc" => "X",
                             other => other,
                         };
                         let response = ui.add_sized([46.0, 44.0], egui::Button::new(display).selected(active));
@@ -266,6 +294,29 @@ mod tests {
         assert!(delivered.iter().any(|event| matches!(event, egui::Event::Text(text) if text == "7")));
         let _ = frame(&mut pad, &mut value, Vec::new(), false);
         assert_eq!(value, "7");
+        assert_eq!(ctx.memory(|m| m.focused()), Some(field));
+        for removed in ["deg", "Undo", "Redo", "Delete"] {
+            assert!(!pad.key_rects.contains_key(removed));
+        }
+        pad.pen = true;
+        let origin = pad.key_rects.get("__move").unwrap().center();
+        let old_position = pad.drawn_position;
+        let moved = origin + egui::vec2(-100.0, -80.0);
+        let _ = frame(
+            &mut pad,
+            &mut value,
+            vec![egui::Event::PointerButton { pos: origin, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }],
+            false,
+        );
+        let _ = frame(&mut pad, &mut value, vec![egui::Event::PointerMoved(moved)], false);
+        let _ = frame(
+            &mut pad,
+            &mut value,
+            vec![egui::Event::PointerButton { pos: moved, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }],
+            false,
+        );
+        assert_eq!(pad.position, Some([old_position.x - 100.0, old_position.y - 80.0]));
+        assert_eq!(value, "7", "moving the keypad must never type its handle label");
         assert_eq!(ctx.memory(|m| m.focused()), Some(field));
     }
     #[test]

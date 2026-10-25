@@ -23,22 +23,22 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_fillet")
         .enabled(in_sketch)
-        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal) | a, b: two lines or arcs meeting at a corner; radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`)", created_doc!())),
+        .params(concat!("corners?: [{point} or {a,b}] (1…500); point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal) | a, b: two lines or arcs meeting at a corner; radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`)", created_doc!())),
     CommandSpec::new("sketch.chamfer.equal_distance", "Equal Distance Chamfer", chamfer_equal)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer")
         .enabled(in_sketch)
-        .params(concat!("point | a, b: a corner of two lines; distance", created_doc!())),
+        .params(concat!("point | points: [corners] | corners: [{point} or {a,b}] | a, b: corners of two lines; distance", created_doc!())),
     CommandSpec::new("sketch.chamfer.distance_angle", "Distance and Angle Chamfer", chamfer_dist_angle)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer_angle")
         .enabled(in_sketch)
-        .params(concat!("point | a, b: a corner of two lines; distance: along a, angle: deg from a", created_doc!())),
+        .params(concat!("point | points: [corners] | corners: [{point} or {a,b}] | a, b: corners of two lines; distance: along a, angle: deg from a", created_doc!())),
     CommandSpec::new("sketch.chamfer.two_distance", "Two Distance Chamfer", chamfer_two)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer_two_distances")
         .enabled(in_sketch)
-        .params(concat!("point | a, b: a corner of two lines; distance: along a, distance2: along b", created_doc!())),
+        .params(concat!("point | points: [corners] | corners: [{point} or {a,b}] | a, b: corners of two lines; distance: along a, distance2: along b", created_doc!())),
     CommandSpec::new("sketch.offset", "Offset", offset)
         .at("SKETCH", "MODIFY")
         .icon("offset")
@@ -913,11 +913,7 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.fillet";
     let r_expr = expr(p, "radius").ok_or_else(|| bad(cmd, "`radius` must be a number or an expression"))?;
     // Several corners at once (`points`), each like a single `point`.
-    let corners: Vec<Value> = match p.get("points").and_then(Value::as_array) {
-        Some(a) if !a.is_empty() && a.len() <= 500 => a.iter().map(|q| json!({ "point": q })).collect(),
-        Some(_) => return Err(bad(cmd, "`points` must list 1…500 corners")),
-        None => vec![p.clone()],
-    };
+    let corners = corner_refs(p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let r = doc.eval(&r_expr, solidcraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
         if !(r > 1e-9 && r < 1e8) {
@@ -1065,18 +1061,45 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
     }
 }
 
-fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl FnOnce(f64) -> Result<(f64, f64)>) -> Result<Value> {
+fn corner_refs(p: &Value, cmd: &str) -> Result<Vec<Value>> {
+    if let Some(a) = p.get("corners") {
+        let a = a
+            .as_array()
+            .filter(|a| !a.is_empty() && a.len() <= 500)
+            .ok_or_else(|| bad(cmd, "`corners` must list 1…500 point or line-pair references"))?;
+        if a.iter().any(|q| !q.is_object()) {
+            return Err(bad(cmd, "each corner must be an object"));
+        }
+        return Ok(a.clone());
+    }
+    match p.get("points") {
+        Some(a) => {
+            let a = a.as_array().filter(|a| !a.is_empty() && a.len() <= 500).ok_or_else(|| bad(cmd, "`points` must list 1…500 corners"))?;
+            Ok(a.iter().map(|q| json!({"point": q})).collect())
+        }
+        None => Ok(vec![p.clone()]),
+    }
+}
+
+fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<(f64, f64)>) -> Result<Value> {
+    let corners = corner_refs(p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
-        refuse_infinite_corner(sk, p, cmd)?;
-        weld_corner(sk, p);
-        let (la, lb, c, fa, fb) = corner(sk, p, cmd)?;
-        let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
-        let (u, v) = ((pa - pc).normalized().unwrap_or(Vec2::X), (pb - pc).normalized().unwrap_or(Vec2::Y));
-        let corner_angle = u.cross(v).atan2(u.dot(v)).abs();
-        let (da, db) = dists(corner_angle)?;
-        let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
-        let l = sk.add_line_pts(ta, tb, None)?;
-        Ok((ids_of(sk, &[l]), kept_json(vec![kept])))
+        let mut curves = Vec::new();
+        let mut kept_corners = Vec::new();
+        for q in &corners {
+            refuse_infinite_corner(sk, q, cmd)?;
+            weld_corner(sk, q);
+            let (la, lb, c, fa, fb) = corner(sk, q, cmd)?;
+            let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
+            let (u, v) = ((pa - pc).normalized().unwrap_or(Vec2::X), (pb - pc).normalized().unwrap_or(Vec2::Y));
+            let corner_angle = u.cross(v).atan2(u.dot(v)).abs();
+            let (da, db) = dists(corner_angle)?;
+            let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
+            let l = sk.add_line_pts(ta, tb, None)?;
+            curves.extend(ids_of(sk, &[l]));
+            kept_corners.push(kept);
+        }
+        Ok((curves, kept_json(kept_corners)))
     })?;
     let (curves, (vc, moved)) = out;
     Ok(json!({"curves": curves, "virtual_corners": vc, "moved_to_virtual_corner": moved, "sketch": info}))

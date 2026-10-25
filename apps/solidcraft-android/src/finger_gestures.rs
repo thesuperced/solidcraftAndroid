@@ -6,6 +6,11 @@ use std::collections::BTreeMap;
 pub struct Gestures {
     contacts: BTreeMap<(i32, i32), ([f32; 2], [f32; 2])>,
     multi: bool,
+    peak: usize,
+    started: i64,
+    tap_valid: bool,
+    three_tap: bool,
+    pub tap_slop: f32,
 }
 
 pub type Motion = ([f32; 2], bool, f32);
@@ -44,6 +49,12 @@ impl Gestures {
     pub fn reset(&mut self) {
         self.contacts.clear();
         self.multi = false;
+        self.peak = 0;
+        self.tap_valid = false;
+        self.three_tap = false;
+    }
+    pub fn take_three_tap(&mut self) -> bool {
+        std::mem::take(&mut self.three_tap)
     }
     pub fn event(&mut self, e: Contact) -> Option<([f32; 2], bool, f32)> {
         if e.source != crate::cad::Source::Finger {
@@ -56,7 +67,13 @@ impl Gestures {
         }
         match e.phase {
             Phase::Down => {
+                if self.contacts.is_empty() {
+                    self.peak = 0;
+                    self.started = e.time_ns;
+                    self.tap_valid = true;
+                }
                 self.contacts.entry(key).or_insert((e.position, e.position));
+                self.peak = self.peak.max(self.contacts.len());
                 self.multi |= self.contacts.len() >= 2;
                 None
             }
@@ -65,8 +82,15 @@ impl Gestures {
                 None
             }
             Phase::Up => {
-                self.contacts.remove(&key);
+                if let Some((origin, _)) = self.contacts.remove(&key) {
+                    self.tap_valid &= (e.position[0] - origin[0]).hypot(e.position[1] - origin[1]) <= self.tap_slop.max(8.0);
+                } else {
+                    return None;
+                }
                 if self.contacts.is_empty() {
+                    self.three_tap |= self.peak == 3
+                        && self.tap_valid
+                        && e.time_ns.checked_sub(self.started).is_some_and(|elapsed| (0..=500_000_000).contains(&elapsed));
                     self.multi = false;
                 }
                 None
@@ -76,6 +100,10 @@ impl Gestures {
                 let contact = self.contacts.get_mut(&key)?;
                 let was = contact.1;
                 contact.1 = e.position;
+                self.tap_valid &= (e.position[0] - contact.0[0]).hypot(e.position[1] - contact.0[1]) <= self.tap_slop.max(8.0);
+                if self.peak >= 3 {
+                    return None;
+                }
                 if old.len() == 1 && !self.multi {
                     let dx = e.position[0] - contact.0[0];
                     let dy = e.position[1] - contact.0[1];
@@ -104,6 +132,38 @@ mod tests {
     use crate::cad::Source;
     fn event(id: i32, phase: Phase, x: f32, y: f32) -> Contact {
         Contact { device: 1, id, source: Source::Finger, phase, position: [x, y], pressure: 1.0, ..Default::default() }
+    }
+    #[test]
+    fn three_finger_tap_uses_one_action_but_drag_cancel_and_four_fingers_do_not() {
+        let mut g = Gestures::default();
+        for id in 1..=3 {
+            g.event(event(id, Phase::Down, id as f32 * 30.0, 0.0));
+        }
+        for id in [2, 1, 3] {
+            g.event(event(id, Phase::Up, id as f32 * 30.0, 0.0));
+        }
+        assert!(g.take_three_tap());
+        assert!(!g.take_three_tap());
+        for id in 1..=3 {
+            g.event(event(id, Phase::Down, id as f32 * 30.0, 0.0));
+        }
+        assert!(g.event(event(1, Phase::Move, 60.0, 0.0)).is_none());
+        for id in 1..=3 {
+            g.event(event(id, Phase::Up, id as f32 * 30.0, 0.0));
+        }
+        assert!(!g.take_three_tap());
+        for id in 1..=4 {
+            g.event(event(id, Phase::Down, id as f32 * 30.0, 0.0));
+        }
+        for id in 1..=4 {
+            g.event(event(id, Phase::Up, id as f32 * 30.0, 0.0));
+        }
+        assert!(!g.take_three_tap());
+        for id in 1..=3 {
+            g.event(event(id, Phase::Down, id as f32 * 30.0, 0.0));
+        }
+        g.event(event(1, Phase::Cancel, 30.0, 0.0));
+        assert!(!g.take_three_tap());
     }
     #[test]
     fn tap_slop_orbit_pinch_and_lift() {

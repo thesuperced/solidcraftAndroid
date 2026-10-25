@@ -2147,7 +2147,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     for pts in &crate::sketch_display::curve_sample(app, *sketch, ci, &ss.plane, &display_proj(app)).parts {
                         let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
                         for (a, b) in sketch_segments(pts, mode, grid_step(app.cam.half_height()).0) {
-                            feedback.line(a.to_f32(), b.to_f32(), c4(t.sel_edge), 3.5, true);
+                            feedback.line(a.to_f32(), b.to_f32(), c4(t.warning), 4.5, true);
                         }
                     }
                 }
@@ -2157,7 +2157,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 for ss in st.sketches.iter() {
                     if let Some(w) = ss.sketch.wire_index(id).and_then(|i| ss.sketch.wires.get(i)) {
                         for q in w.pts.windows(2) {
-                            feedback.line(q[0].to_f32(), q[1].to_f32(), c4(t.sel_edge), 3.5, true);
+                            feedback.line(q[0].to_f32(), q[1].to_f32(), c4(t.warning), 4.5, true);
                         }
                     }
                 }
@@ -2169,7 +2169,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     for pts in &crate::sketch_display::curve_sample(app, ss.feature, ci, &ss.plane, &display_proj(app)).parts {
                         let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
                         for (a, b) in sketch_segments(pts, mode, grid_step(app.cam.half_height()).0) {
-                            feedback.line(a.to_f32(), b.to_f32(), c4(t.sel_edge), 3.5, true);
+                            feedback.line(a.to_f32(), b.to_f32(), c4(t.warning), 4.5, true);
                         }
                     }
                 }
