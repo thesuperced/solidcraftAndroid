@@ -436,9 +436,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                             d.pick(&app.session, solidcraft_engine::Sel::Feature { id: *id });
                             app.dialog = Some(d);
                         }
-                    } else if crate::tablet_input::action(crate::tablet_input::ADD) {
-                        let _ = app.run("select.set", json!({"items":[{"type":"feature","id":id}],"add":true}));
-                    } else if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+                    } else if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) || crate::tablet_input::action(crate::tablet_input::ADD) {
                         toggle_feature(app, *id);
                     } else {
                         app.tree.picked_joints.clear();

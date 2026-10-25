@@ -13,6 +13,21 @@ pub fn cancel_pen() {
 pub fn take_pen_cancel() -> bool {
     PEN_CANCELED.swap(false, Ordering::Relaxed)
 }
+/// Ignore the rest of an active pen contact after off-hand cancellation, until release.
+pub fn cancel_modeling() {
+    if let Ok(mut state) = ROUTER.lock() {
+        let mut canceled = false;
+        for owner in state.owners.values_mut() {
+            if *owner == Owner::Modeling {
+                *owner = Owner::Rejected;
+                canceled = true;
+            }
+        }
+        if canceled {
+            cancel_pen();
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Source {
@@ -142,22 +157,14 @@ impl CadInputRouter {
             } else {
                 match event.source {
                     Source::Stylus | Source::Eraser => Owner::Modeling,
-                    Source::Finger if !pen_down => Owner::Camera,
+                    // Test-build policy: viewport fingers may navigate during pen contact.
+                    // Explicit controls above always keep their independent captures.
+                    Source::Finger => Owner::Camera,
                     Source::Mouse => Owner::Ui,
                     _ => Owner::Rejected,
                 }
             };
             self.owners.entry(key).or_insert(owner);
-            // Reject already captured viewport fingers if a pen begins modeling. Explicit UI
-            // controls keep their owners and remain usable by the off hand.
-            if owner == Owner::Modeling {
-                for captured in self.owners.values_mut() {
-                    if *captured == Owner::Camera {
-                        *captured = Owner::Rejected;
-                    }
-                }
-                self.events.push(Contact { phase: Phase::Cancel, source: Source::Finger, ..event });
-            }
         }
         let owner = self.owner(event.device, event.id).unwrap_or(Owner::Rejected);
         match owner {
@@ -295,7 +302,7 @@ mod tests {
         assert!(r.route(contact(4, Source::Finger, Phase::Down, 130.0)));
         assert_eq!(r.owner(7, 4), Some(Owner::Control(3)));
         assert!(r.route(contact(5, Source::Finger, Phase::Down, 30.0)));
-        assert_eq!(r.owner(7, 5), Some(Owner::Rejected));
+        assert_eq!(r.owner(7, 5), Some(Owner::Camera));
         assert!(!r.route(contact(8, Source::Stylus, Phase::Move, 140.0)));
         assert!(r.route(contact(4, Source::Finger, Phase::Cancel, 10.0)));
         assert_eq!(r.owner(7, 8), Some(Owner::Modeling));

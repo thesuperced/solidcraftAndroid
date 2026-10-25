@@ -60,7 +60,7 @@ impl Keypad {
             "Tab" => self.key(egui::Key::Tab, plain),
             text => self.pending.push(egui::Event::Text(if text == "Space" {
                 " ".into()
-            } else if self.shift && text.len() == 1 && text.is_ascii() {
+            } else if self.shift && text.chars().count() == 1 {
                 text.to_uppercase()
             } else {
                 text.into()
@@ -145,7 +145,7 @@ impl Keypad {
         let screen = ctx.content_rect();
         let field = self.owner.and_then(|id| ctx.read_response(id)).map(|r| r.rect);
         let width = 260.0;
-        let height = if self.abc { 380.0 } else { 280.0 };
+        let height = if self.abc { 430.0 } else { 280.0 };
         let field = field.unwrap_or_else(|| egui::Rect::from_center_size(screen.center(), egui::vec2(72.0, 24.0)));
         let x = if field.right() + width + 12.0 < screen.right() { field.right() + 8.0 } else { field.left() - width - 8.0 };
         let position = egui::pos2(
@@ -160,7 +160,9 @@ impl Keypad {
             .title_bar(false)
             .show(&ctx, |ui| {
                 let defaults: Vec<&str> = if self.abc {
-                    "a b c d e f g h i j k l m n o p q r s t u v w x y z _ / : Space 123 Backspace Clear Esc Enter".split_whitespace().collect()
+                    "a b c d e f g h i j k l m n o p q r s t u v w x y z ä ö ü _ / : Space Shift 123 Backspace Clear Esc Enter"
+                        .split_whitespace()
+                        .collect()
                 } else {
                     "7 8 9 / Backspace 4 5 6 * Clear 1 2 3 - mm 0 . + deg Enter Esc Undo Redo Delete ABC".split_whitespace().collect()
                 };
@@ -200,6 +202,15 @@ impl Keypad {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn german_letters_and_shift_enter_unicode_text() {
+        let mut pad = Keypad::default();
+        for label in ["ä", "ö", "ü", "Shift", "ä", "ö", "ü"] {
+            pad.activate(label);
+        }
+        let text: String = pad.pending.iter().filter_map(|e| if let egui::Event::Text(text) = e { Some(text.as_str()) } else { None }).collect();
+        assert_eq!(text, "äöüÄÖÜ");
+    }
     #[test]
     fn touching_a_key_restores_text_focus_and_replaces_selection() {
         let ctx = egui::Context::default();

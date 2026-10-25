@@ -1,4 +1,4 @@
-//! Tablet policy and semantic controls. Native contacts never become keyboard modifiers.
+//! Tablet selection policy and off-hand controls sharing the desktop command paths.
 use std::{cell::RefCell, collections::BTreeMap};
 
 #[derive(Clone, Copy, Debug)]
@@ -121,72 +121,6 @@ impl Transaction {
         }
     }
 }
-/// Context-valid modeling actions start the same dialogs as the desktop toolbar.
-pub fn context_actions(app: &mut crate::SolveApp, ctx: &egui::Context) {
-    if ctx.egui_wants_keyboard_input() {
-        return;
-    }
-    let Some(rect) = app.viewport.rect else { return };
-    let commands: Vec<_> = if app.tool.is_none() && app.dialog.is_none() {
-        use solidcraft_engine::Sel;
-        let selected = &app.session.selection;
-        [
-            ("solid.extrude", "Extrude", selected.iter().any(|s| matches!(s, Sel::Profile { .. }))),
-            ("solid.fillet", "Fillet", selected.iter().any(|s| matches!(s, Sel::Edge { .. }))),
-            ("solid.move", "Move / Rotate", selected.iter().any(|s| matches!(s, Sel::Body { .. }))),
-            ("solid.offset_face", "Offset Face", selected.iter().any(|s| matches!(s, Sel::Face { .. }))),
-            ("sketch.create", "Sketch", selected.iter().any(|s| matches!(s, Sel::Face { .. } | Sel::Plane { .. }))),
-        ]
-        .into_iter()
-        .filter(|(id, _, valid)| *valid && solidcraft_engine::find_command(id).is_some_and(|c| c.info(&app.session).enabled))
-        .collect()
-    } else {
-        Vec::new()
-    };
-    let at = crate::viewport::selection_bounds(app)
-        .and_then(|bounds| crate::viewport::projection(app, rect).to_screen(bounds.center()))
-        .unwrap_or(rect.center());
-    let position = egui::pos2(
-        (at.x + 24.0).clamp(rect.left(), (rect.right() - 340.0).max(rect.left())),
-        (at.y + 48.0).clamp(rect.top(), (rect.bottom() - 70.0).max(rect.top())),
-    );
-    if !commands.is_empty() {
-        egui::Area::new(egui::Id::new("tablet_context_actions")).fixed_pos(position).order(egui::Order::Foreground).show(ctx, |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    for (command, label, _) in commands {
-                        if ui.add_sized([94.0, 44.0], egui::Button::new(label)).clicked() {
-                            app.start(command);
-                        }
-                    }
-                });
-            });
-        });
-    }
-    egui::Area::new(egui::Id::new("tablet_tool_actions"))
-        .fixed_pos(egui::pos2(rect.left() + 120.0, rect.bottom() - 118.0))
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if ui.add_sized([72.0, 44.0], egui::Button::new("Undo")).clicked() {
-                        let _ = app.run("edit.undo", serde_json::json!({}));
-                    }
-                    if ui.add_sized([72.0, 44.0], egui::Button::new("Redo")).clicked() {
-                        let _ = app.run("edit.redo", serde_json::json!({}));
-                    }
-                    if app.tool.is_some() {
-                        if ui.add_sized([72.0, 44.0], egui::Button::new("Finish")).clicked() {
-                            crate::tools::finish(app);
-                        }
-                        if ui.add_sized([72.0, 44.0], egui::Button::new("Cancel")).clicked() {
-                            cancel(app);
-                        }
-                    }
-                });
-            });
-        });
-}
 pub fn cancel(app: &mut crate::SolveApp) {
     crate::sketch_text_handles::drag_end(app);
     crate::sketch_text_move::cancel_drag(app);
@@ -208,7 +142,7 @@ pub fn cancel(app: &mut crate::SolveApp) {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Filter {
     #[default]
     All,
@@ -242,112 +176,273 @@ impl Filter {
     }
 }
 
-/// State keyed by device + pointer ID, independent of egui's single mouse cursor.
-#[derive(Default)]
+/// Native contacts keep their own capture so controls never borrow the pen cursor.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Dock {
-    latched: [bool; 7],
+    #[serde(skip)]
     held: BTreeMap<(i32, i32), (u8, f64, [f32; 2])>,
+    #[serde(skip)]
     pub filter: Filter,
     pub right: bool,
+    position: Option<[f32; 2]>,
+    hidden: bool,
+    quick_open: bool,
+    pub shortcuts: [String; 7],
+    #[serde(skip)]
+    editing: bool,
+    #[serde(skip)]
     context: String,
+    #[serde(skip)]
+    pending: Vec<u8>,
+    #[serde(skip)]
+    drag: Option<([f32; 2], [f32; 2])>,
+    #[serde(skip)]
+    dragging: bool,
+    #[serde(skip)]
+    panel_origin: [f32; 2],
 }
 impl Dock {
     pub fn reset(&mut self) {
         self.held.clear();
-        self.latched = [false; 7];
+        self.drag = None;
+        self.dragging = false;
+        self.pending.clear();
     }
     pub fn context(&mut self, key: String) {
         if self.context != key {
-            self.reset();
+            // Filters belong to the current modeling context, never leak from faces to sketches.
+            self.filter = Filter::All;
             self.context = key;
         }
     }
     pub fn actions(&self) -> [bool; 7] {
-        let mut active = self.latched;
-        for (id, _, _) in self.held.values() {
-            if let Some(on) = active.get_mut(*id as usize) {
-                *on = true;
-            }
-        }
+        let mut active = [false; 7];
+        active[ADD] = self.held.values().any(|(id, _, _)| *id == 0);
         active
     }
-    /// Down activates immediately. A short stationary release toggles the latch; a hold or
-    /// canceled contact only releases its momentary action. Multiple fingers combine with OR.
+    pub fn take_actions(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.pending)
+    }
+    fn activate(&mut self, id: u8) {
+        match id {
+            0 => {}
+            20 => {
+                self.right = !self.right;
+                self.position = None;
+            }
+            25 => self.quick_open = !self.quick_open,
+            28 => self.hidden = true,
+            30 => self.hidden = false,
+            47 => self.editing = !self.editing,
+            10..=15 => {
+                if let Some(filter) = id.checked_sub(10).and_then(|i| Filter::ALL.get(i as usize)) {
+                    self.filter = *filter;
+                }
+            }
+            _ => self.pending.push(id),
+        }
+    }
+    pub fn move_contact(&mut self, device: i32, pointer: i32, at: [f32; 2], pen: bool, slop: f32) {
+        if !pen || self.held.get(&(device, pointer)).is_none_or(|(id, _, _)| *id != 20) {
+            return;
+        }
+        if let Some((origin, base)) = self.drag {
+            let delta = [at[0] - origin[0], at[1] - origin[1]];
+            if self.dragging || delta[0].hypot(delta[1]) > slop {
+                self.dragging = true;
+                self.position = Some([base[0] + delta[0], base[1] + delta[1]]);
+            }
+        }
+    }
+    /// Ctrl is strictly momentary, like a physical keyboard key; every Up/Cancel releases it.
     pub fn contact(&mut self, device: i32, pointer: i32, control: u8, down: bool, cancel: bool, at: [f32; 2], now: f64, hold: f64, slop: f32) {
         let key = (device, pointer);
         if down {
             self.held.entry(key).or_insert((control, now, at));
+            if control == 20 {
+                self.drag = Some((at, self.panel_origin));
+                self.dragging = false;
+            }
         } else if let Some((id, start, origin)) = self.held.remove(&key) {
-            if cancel {
+            if id == 20 {
+                self.drag = None;
+                if std::mem::take(&mut self.dragging) {
+                    return;
+                }
+            }
+            if cancel || id == 0 {
                 return;
             }
-            let tap = now >= start && now - start < hold && (at[0] - origin[0]).hypot(at[1] - origin[1]) <= slop;
-            if tap {
-                if let Some(latch) = self.latched.get_mut(id as usize) {
-                    *latch = !*latch;
-                } else if id == 20 {
-                    self.right = !self.right;
-                } else if let Some(filter) = id.checked_sub(10).and_then(|i| Filter::ALL.get(i as usize)) {
-                    self.filter = *filter;
+            if now >= start && (at[0] - origin[0]).hypot(at[1] - origin[1]) <= slop {
+                if (40..=46).contains(&id) && now - start >= hold {
+                    self.editing = true;
+                } else {
+                    self.activate(id);
                 }
             }
         }
     }
-    pub fn show(&self, ctx: &egui::Context, sketch: bool, feature: bool, selecting_box: bool) -> Vec<(u8, egui::Rect)> {
+    pub fn show(&mut self, ctx: &egui::Context, _sketch: bool, _feature: bool, selecting_box: bool) -> Vec<(u8, egui::Rect)> {
         let mut regions = Vec::new();
-        let active = self.actions();
-        egui::Area::new(egui::Id::new("tablet_semantic_dock"))
-            .anchor(if self.right { egui::Align2::RIGHT_CENTER } else { egui::Align2::LEFT_CENTER }, [if self.right { -12.0 } else { 12.0 }, 40.0])
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
+        let screen = ctx.content_rect();
+        if self.hidden {
+            let out = egui::Area::new(egui::Id::new("tablet_restore"))
+                .fixed_pos(egui::pos2(screen.left(), screen.center().y))
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    let r = ui.add_sized([28.0, 64.0], egui::Button::new("›"));
+                    regions.push((30, r.rect));
+                    r.clicked()
+                });
+            if out.inner {
+                self.activate(30);
+            }
+            return regions;
+        }
+        let height = 9.0 * 44.0 + 22.0 + 48.0;
+        let extra_width = if self.quick_open { 104.0 } else { 0.0 } + if selecting_box { 104.0 } else { 0.0 };
+        let default =
+            egui::pos2(if self.right { screen.right() - 110.0 } else { screen.left() + 12.0 }, (screen.center().y - height * 0.5).max(screen.top()));
+        let p = self.position.map(|p| egui::pos2(p[0], p[1])).unwrap_or(default);
+        let p = egui::pos2(
+            p.x.clamp(screen.left(), (screen.right() - 110.0 - extra_width).max(screen.left())),
+            p.y.clamp(screen.top(), (screen.bottom() - height).max(screen.top())),
+        );
+        self.panel_origin = [p.x, p.y];
+        let mut clicked = Vec::new();
+        let out = egui::Area::new(egui::Id::new("tablet_semantic_dock")).fixed_pos(p).order(egui::Order::Foreground).show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                for (id, label, h) in [
+                    (20, if self.right { "←" } else { "→" }, 22.0),
+                    (0, "CTRL", 44.0),
+                    (21, "Cancel", 44.0),
+                    (22, "TAB", 44.0),
+                    (23, "Delete", 44.0),
+                    (25, "QP", 44.0),
+                    (26, "Redo", 44.0),
+                    (27, "Undo", 44.0),
+                    (28, "Hide", 44.0),
+                    (29, "Finish", 44.0),
+                ] {
+                    let r =
+                        ui.add_sized([82.0, h], egui::Button::new(label).selected((id == 0 && self.actions()[ADD]) || (id == 25 && self.quick_open)));
+                    regions.push((id, r.rect));
+                    if r.clicked() {
+                        clicked.push(id);
+                    }
+                    crate::scenario::publish_handle(&format!("tablet:{label}"), r.rect.center());
+                }
+            });
+        });
+        // Capture panel gaps too, preventing accidental canvas navigation behind the panel.
+        regions.push((253, out.response.rect));
+        let extra_x = (out.response.rect.right() + 6.0).min((screen.right() - 110.0).max(screen.left()));
+        if self.quick_open {
+            egui::Area::new(egui::Id::new("tablet_quick_panel")).fixed_pos(egui::pos2(extra_x, p.y)).order(egui::Order::Foreground).show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    for (id, label, visible) in [
-                        (0, "Add", true),
-                        (1, "Range", true),
-                        (2, "No Snap", sketch),
-                        (3, "Midpoint", sketch),
-                        (4, "Free", feature || sketch),
-                        (5, "Reselect", feature),
-                        (6, "Copy", feature),
-                    ] {
-                        if visible {
-                            let r = ui.add_sized([82.0, 44.0], egui::Button::new(label).selected(active.get(id as usize).copied().unwrap_or(false)));
-                            regions.push((id, r.rect));
+                    for (i, shortcut) in self.shortcuts.iter().enumerate() {
+                        let label = if shortcut.is_empty() { format!("Slot {}", i + 1) } else { shortcut.clone() };
+                        let r = ui.add_sized([82.0, 44.0], egui::Button::new(label));
+                        regions.push((40 + i as u8, r.rect));
+                        if r.clicked() {
+                            clicked.push(40 + i as u8);
                         }
                     }
-                    let r = ui.add_sized([82.0, 44.0], egui::Button::new(if self.right { "Dock left" } else { "Dock right" }));
-                    regions.push((20, r.rect));
-                    if selecting_box {
-                        ui.separator();
-                        for (i, filter) in Filter::ALL.iter().enumerate() {
-                            let r = ui.add_sized([82.0, 44.0], egui::Button::new(filter.label()).selected(self.filter == *filter));
-                            regions.push((10 + i as u8, r.rect));
-                        }
+                    let r = ui.add_sized([82.0, 32.0], egui::Button::new("Edit slots"));
+                    regions.push((47, r.rect));
+                    if r.clicked() {
+                        clicked.push(47);
                     }
                 });
             });
+        }
+        if selecting_box {
+            // Keep filters available beyond the pen cursor, without stealing its capture.
+            egui::Area::new(egui::Id::new("tablet_box_filters"))
+                .fixed_pos(egui::pos2(if self.quick_open { (extra_x + 104.0).min(screen.right() - 100.0) } else { extra_x }, p.y))
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        for (i, filter) in Filter::ALL.iter().enumerate() {
+                            let r = ui.add_sized([82.0, 44.0], egui::Button::new(filter.label()).selected(self.filter == *filter));
+                            regions.push((10 + i as u8, r.rect));
+                            if r.clicked() {
+                                clicked.push(10 + i as u8);
+                            }
+                        }
+                    });
+                });
+        }
+        for id in clicked {
+            self.activate(id);
+        }
+        if self.editing {
+            egui::Window::new("Quick Panel shortcuts").collapsible(false).resizable(false).show(ctx, |ui| {
+                ui.label("Enter shortcuts such as M, E, or Ctrl+Shift+K.");
+                for (i, shortcut) in self.shortcuts.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Slot {}", i + 1));
+                        ui.add(egui::TextEdit::singleline(shortcut).char_limit(40).desired_width(140.0));
+                    });
+                }
+                if ui.button("Done").clicked() {
+                    self.editing = false;
+                }
+            });
+        }
         regions
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn interleaved_holds_latches_and_cancel_do_not_share_pointer_state() {
-        let mut d = Dock::default();
-        let at = [0.0, 0.0];
-        d.contact(1, 91, 0, true, false, at, 0.0, 0.5, 8.0);
-        d.contact(1, 3, 0, true, false, at, 0.1, 0.5, 8.0);
-        assert!(d.actions()[ADD]);
-        d.contact(1, 91, 0, false, true, at, 0.7, 0.5, 8.0);
-        assert!(d.actions()[ADD]);
-        d.contact(1, 3, 0, false, false, at, 0.8, 0.5, 8.0);
-        assert!(!d.actions()[ADD]);
-        d.contact(1, 91, 2, true, false, at, 1.0, 0.5, 8.0);
-        d.contact(1, 91, 2, false, false, at, 1.1, 0.5, 8.0);
-        assert!(d.actions()[NO_SNAP]);
-        d.context("sketch.line".into());
-        assert_eq!(d.actions(), [false; 7]);
+/// Run the existing key paths. This also handles focus traversal in active dimension fields.
+pub fn key_events(shortcut: &str) -> Option<Vec<egui::Event>> {
+    let mut modifiers = egui::Modifiers::NONE;
+    let mut key = None;
+    for part in shortcut.trim().split('+') {
+        match part.trim().to_ascii_lowercase().as_str() {
+            "ctrl" | "control" | "cmd" => {
+                modifiers.ctrl = true;
+                modifiers.command = true;
+            }
+            "shift" => modifiers.shift = true,
+            "alt" => modifiers.alt = true,
+            name if key.is_none() => {
+                key = egui::Key::from_name(&name.to_ascii_uppercase()).or_else(|| egui::Key::from_name(part.trim()));
+                key?;
+            }
+            _ => return None,
+        }
+    }
+    let key = key?;
+    Some([true, false].into_iter().map(|pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers }).collect())
+}
+/// Commands with field-sensitive behavior run before the normal widget/shortcut pass.
+pub fn panel_action(app: &mut crate::SolveApp, action: u8) {
+    match action {
+        21 => {
+            cancel(app);
+            let _ = app.run("select.clear", serde_json::json!({}));
+        }
+        26 => {
+            let _ = app.run("edit.redo", serde_json::json!({}));
+        }
+        27 => {
+            let _ = app.run("edit.undo", serde_json::json!({}));
+        }
+        29 => {
+            if app.dialog.is_some() {
+                app.synthetic.extend(key_events("Enter").unwrap_or_default());
+            } else if app.tool.is_some() {
+                crate::tools::finish(app);
+                // Finish ends the tool, including a line tool's remaining chain.
+                if app.tool.is_some() {
+                    crate::tools::finish(app);
+                }
+            } else if app.session.active_sketch.is_some() {
+                app.finish_sketch();
+            }
+        }
+        _ => {}
     }
 }

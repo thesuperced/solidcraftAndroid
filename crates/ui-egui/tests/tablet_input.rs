@@ -82,6 +82,115 @@ fn pen_sketch_uses_shared_tool_preview_creation_and_undo() {
 }
 
 #[test]
+fn pen_sketch_curve_toggle_ctrl_selection_and_double_tap_chain() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.cam.distance = 90.0;
+    h.app.ui.show_origin = false;
+    h.settle();
+    let _tablet = Tablet::pen();
+    h.app.start("sketch.line");
+    for point in [[5, 5], [25, 5], [25, 25]] {
+        h.step(&json!({"click":{"sketch":point}})).unwrap();
+    }
+    tablet::panel_action(&mut h.app, 21);
+    h.frames(40);
+    let a = json!({"sketch":[15,5]});
+    let b = json!({"sketch":[25,15]});
+    h.step(&json!({"click":a})).unwrap();
+    assert!(matches!(h.app.session.selection.as_slice(), [Sel::SketchCurve { .. }]), "{:?}", h.app.session.selection);
+    h.frames(40);
+    h.step(&json!({"click":a})).unwrap();
+    assert!(h.app.session.selection.is_empty());
+    let mut p = tablet::policy();
+    p.actions[tablet::ADD] = true;
+    tablet::set(p);
+    h.frames(40);
+    h.step(&json!({"click":a})).unwrap();
+    h.frames(40);
+    h.step(&json!({"click":b})).unwrap();
+    assert_eq!(h.app.session.selection.len(), 2);
+    h.frames(40);
+    h.step(&json!({"click":a})).unwrap();
+    assert_eq!(h.app.session.selection.len(), 1, "held CTRL must allow deselection");
+    p.actions = [false; 7];
+    tablet::set(p);
+    h.frames(40);
+    h.step(&json!({"click":a,"double":true})).unwrap();
+    assert_eq!(h.app.session.selection.len(), 2, "double tap selects the connected sketch chain");
+}
+
+#[test]
+fn panel_dispatch_undo_redo_finish_shortcuts_and_context_reset() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+    tablet::panel_action(&mut h.app, 27);
+    assert!(h.app.session.world_state().bodies.is_empty());
+    tablet::panel_action(&mut h.app, 26);
+    assert_eq!(h.app.session.world_state().bodies.len(), 1);
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.start("sketch.line");
+    tablet::panel_action(&mut h.app, 29);
+    assert!(h.app.tool.is_none());
+    tablet::panel_action(&mut h.app, 29);
+    assert!(h.app.session.active_sketch.is_none());
+    let mut dock = Dock::default();
+    dock.filter = tablet::Filter::Faces;
+    dock.context("sketch".into());
+    assert_eq!(dock.filter, tablet::Filter::All);
+    assert!(tablet::key_events("Ctrl+Shift+M").is_some());
+    assert!(tablet::key_events("Tab").is_some());
+    assert!(tablet::key_events("Delete").is_some());
+    assert!(tablet::key_events("not a shortcut").is_none());
+}
+
+#[test]
+fn panel_drag_dock_hide_restore_and_shortcut_preferences() {
+    let ctx = egui::Context::default();
+    let mut dock = Dock::default();
+    let draw = |dock: &mut Dock| {
+        let mut regions = Vec::new();
+        let mut output = ctx.run_ui(
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))), ..Default::default() },
+            |ui| {
+                regions = dock.show(ui.ctx(), false, false, false);
+            },
+        );
+        output.textures_delta.clear();
+        regions
+    };
+    draw(&mut dock);
+    let regions = draw(&mut dock);
+    let arrow = regions.iter().find(|(id, _)| *id == 20).unwrap().1.center();
+    let at = [arrow.x, arrow.y];
+    dock.contact(1, 7, 20, true, false, at, 0.0, 0.5, 8.0);
+    let moved = [at[0] + 150.0, at[1] + 40.0];
+    dock.move_contact(1, 7, moved, true, 8.0);
+    dock.contact(1, 7, 20, false, false, moved, 0.3, 0.5, 8.0);
+    let regions = draw(&mut dock);
+    let next = regions.iter().find(|(id, _)| *id == 20).unwrap().1.center();
+    assert!((next.x - arrow.x - 150.0).abs() < 1.0);
+    assert!(!dock.right, "dragging must not also switch dock sides");
+    for down in [true, false] {
+        dock.contact(1, 7, 20, down, false, [next.x, next.y], 1.0, 0.5, 8.0);
+    }
+    assert!(dock.right);
+    for down in [true, false] {
+        dock.contact(1, 7, 28, down, false, at, 2.0, 0.5, 8.0);
+    }
+    assert_eq!(draw(&mut dock).iter().map(|(id, _)| *id).collect::<Vec<_>>(), vec![30]);
+    for down in [true, false] {
+        dock.contact(1, 7, 30, down, false, at, 3.0, 0.5, 8.0);
+    }
+    assert!(draw(&mut dock).iter().any(|(id, _)| *id == 29));
+    dock.shortcuts[0] = "M".into();
+    let restored: Dock = serde_json::from_str(&serde_json::to_string(&dock).unwrap()).unwrap();
+    assert_eq!(restored.shortcuts[0], "M");
+    assert!(restored.right);
+    assert_eq!(restored.actions(), [false; 7]);
+}
+
+#[test]
 fn pen_gizmo_drag_changes_dialog_value_without_moving_camera() {
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
@@ -154,13 +263,15 @@ fn held_pen_box_accepts_filter_change_without_releasing_pen() {
 }
 
 #[test]
-fn off_hand_holds_are_independent_and_cancel_releases_every_action() {
+fn off_hand_ctrl_holds_are_independent_and_release_never_latches() {
     let mut d = Dock::default();
-    d.contact(1, 55, 2, true, false, [0.0; 2], 1.0, 0.5, 8.0);
-    d.contact(1, 8, 3, true, false, [0.0; 2], 1.1, 0.5, 8.0);
-    assert!(d.actions()[tablet::NO_SNAP] && d.actions()[tablet::MIDPOINT]);
-    d.contact(1, 55, 2, false, true, [0.0; 2], 2.0, 0.5, 8.0);
-    assert!(!d.actions()[tablet::NO_SNAP] && d.actions()[tablet::MIDPOINT]);
+    d.contact(1, 55, 0, true, false, [0.0; 2], 1.0, 0.5, 8.0);
+    d.contact(1, 8, 0, true, false, [0.0; 2], 1.1, 0.5, 8.0);
+    assert!(d.actions()[tablet::ADD]);
+    d.contact(1, 55, 0, false, true, [0.0; 2], 1.15, 0.5, 8.0);
+    assert!(d.actions()[tablet::ADD]);
+    d.contact(1, 8, 0, false, false, [0.0; 2], 1.2, 0.5, 8.0);
+    assert!(!d.actions()[tablet::ADD], "short Ctrl taps must not leave Ctrl stuck");
     d.reset();
     assert_eq!(d.actions(), [false; 7]);
 }
@@ -191,7 +302,7 @@ fn desktop_modifiers_remain_independent_of_tablet_policy() {
     let mut p = tablet::policy();
     p.actions[tablet::ADD] = true;
     tablet::set(p);
-    assert_eq!(selection_click(Held::default(), true), (true, false));
+    assert_eq!(selection_click(Held::default(), true), (true, true));
     assert_eq!(selection_click(Held { primary: true, ..Default::default() }, true), (true, true));
 }
 
@@ -253,8 +364,12 @@ fn render_tablet_controls_for_review() {
     let mut app = solidcraft_ui_egui::SolveApp::new(Default::default(), Default::default());
     let ctx = egui::Context::default();
     solidcraft_ui_egui::fonts::setup_fonts(&ctx);
-    let dock = Dock::default();
-    for frame in 0..4 {
+    let mut dock = Dock::default();
+    dock.shortcuts[0] = "M".into();
+    for down in [true, false] {
+        dock.contact(1, 7, 25, down, false, [0.0; 2], 1.0, 0.5, 8.0);
+    }
+    for frame in 0..24 {
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1024.0))),
             focused: true,

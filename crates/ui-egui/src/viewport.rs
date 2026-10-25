@@ -3186,11 +3186,7 @@ fn paint_toast(ui: &egui::Ui, free: Rect, text: String, error: bool, computing: 
 /// When `add` is true but `toggle` is false (Shift add-only preference), picked items
 /// are only added.
 pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bool) {
-    let (add, toggle) = if crate::tablet_input::pen() && app.tool.is_none() && app.dialog.is_none() {
-        (sel.is_some(), !crate::tablet_input::action(crate::tablet_input::ADD))
-    } else {
-        (add, toggle)
-    };
+    let (add, toggle) = if crate::tablet_input::pen() && app.tool.is_none() && app.dialog.is_none() { (sel.is_some(), true) } else { (add, toggle) };
     if !add {
         // A joint picked in the browser (highlighted even when hidden) lets go.
         app.tree.picked_joints.clear();

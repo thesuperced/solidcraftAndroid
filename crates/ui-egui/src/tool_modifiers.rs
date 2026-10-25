@@ -487,10 +487,9 @@ pub fn resolve(context: &[Scope], tool: Option<&ToolModifiers>, held: Held, trig
         set.insert(slot.1);
     }
     use crate::tablet_input as tablet;
-    // Touch controls contribute semantic actions directly. A physical toggle chord wins
-    // over the touch Add latch; no synthetic keyboard state is introduced.
+    // The held tablet CTRL button uses the same selection-toggle semantics as physical Ctrl.
     for (index, action, allowed) in [
-        (tablet::ADD, ModAction::SelectAdd, context.contains(&Scope::Selection)),
+        (tablet::ADD, ModAction::SelectToggle, context.contains(&Scope::Selection)),
         (tablet::NO_SNAP, ModAction::SuppressSnap, context.contains(&Scope::SketchDraw) || context.contains(&Scope::SketchDrag)),
         (tablet::FREE, ModAction::FreeManipulatorDrag, true),
         (tablet::MIDPOINT, ModAction::TargetMidpoint, context.contains(&Scope::SketchDraw) || context.contains(&Scope::SketchDrag)),

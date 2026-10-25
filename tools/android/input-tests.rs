@@ -34,4 +34,12 @@ fn exclusive_capture_survives_crossing_and_pen_contact() {
     assert!(drain().iter().any(|e| e.phase == Phase::Cancel));
     assert!(route(Contact { phase: Phase::Up, ..e }));
     reset();
+    let pen = Contact { source: Source::Stylus, ..e };
+    assert!(!route(pen));
+    cancel_modeling();
+    assert!(take_pen_cancel());
+    assert!(route(Contact { phase: Phase::Move, ..pen }));
+    assert!(route(Contact { phase: Phase::Up, ..pen }));
+    assert!(!route(pen), "a new pen contact works after Cancel");
+    reset();
 }

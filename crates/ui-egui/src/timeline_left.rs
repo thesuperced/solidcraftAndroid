@@ -302,7 +302,7 @@ fn select_item(app: &mut SolveApp, ui: &egui::Ui, item: TimelineItem, order: &[T
                 let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": id}]}));
             } else {
                 let selected = selected_feature_ids(app);
-                if selected.contains(&id) && !touch_add {
+                if selected.contains(&id) {
                     let items: Vec<_> =
                         selected.into_iter().filter(|selected| *selected != id).map(|selected| json!({"type": "feature", "id": selected})).collect();
                     let _ = app.run("select.set", json!({"items": items}));

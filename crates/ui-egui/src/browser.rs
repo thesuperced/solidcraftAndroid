@@ -487,11 +487,7 @@ fn click_select(app: &mut SolveApp, ui: &egui::Ui, key: String, sel: Option<Sel>
     }
     app.tree.anchor = Some(key);
     let Some(sel) = sel else { return };
-    if crate::tablet_input::action(crate::tablet_input::ADD) && !(mods.command || mods.ctrl) {
-        let _ = app.run("select.set", json!({"items":[sel],"add":true}));
-        return;
-    }
-    if mods.command || mods.ctrl {
+    if mods.command || mods.ctrl || crate::tablet_input::action(crate::tablet_input::ADD) {
         if app.session.selection.contains(&sel) {
             let rest: Vec<Sel> = app.session.selection.iter().filter(|x| **x != sel).cloned().collect();
             let _ = app.run("select.set", json!({ "items": rest }));

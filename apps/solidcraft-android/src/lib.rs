@@ -338,7 +338,7 @@ impl eframe::App for Shell {
             self.solve.tool.as_ref().map(|tool| tool.cmd.to_owned()).unwrap_or_else(|| {
                 self.solve.dialog.as_ref().map(|dialog| format!("{:?}", std::mem::discriminant(&dialog.kind))).unwrap_or_default()
             });
-        self.dock.context(context);
+        self.dock.context(format!("{:?}:{context}", self.solve.session.active_sketch));
         let slop = (self.input_config[0] as f32 / ctx.pixels_per_point()).clamp(2.0, 64.0);
         let hold = (self.input_config[1] as f64 / 1000.0).clamp(0.2, 2.0);
         ctx.options_mut(|options| {
@@ -363,7 +363,9 @@ impl eframe::App for Shell {
                 }
                 continue;
             }
-            if matches!(c.phase, cad::Phase::Down | cad::Phase::Up | cad::Phase::Cancel) {
+            if c.phase == cad::Phase::Move {
+                self.dock.move_contact(c.device, c.id, at, matches!(c.source, cad::Source::Stylus | cad::Source::Eraser), slop);
+            } else if matches!(c.phase, cad::Phase::Down | cad::Phase::Up | cad::Phase::Cancel) {
                 self.dock.contact(
                     c.device,
                     c.id,
@@ -426,6 +428,39 @@ impl eframe::App for Shell {
         }
         apply_android_modifiers(&mut self.modifiers, raw);
         self.keypad.input(raw, self.modifiers);
+        for action in self.dock.take_actions() {
+            match action {
+                22 | 23 => raw.events.extend(tablet_input::key_events(if action == 22 { "Tab" } else { "Delete" }).unwrap_or_default()),
+                40..=46 => {
+                    if let Some(shortcut) = self.dock.shortcuts.get((action - 40) as usize) {
+                        if let Some(events) = tablet_input::key_events(shortcut) {
+                            // Explicit shortcut modifiers belong to this command, independent of held CTRL.
+                            raw.events.push(egui::Event::ModifiersChanged(
+                                events
+                                    .first()
+                                    .and_then(|e| if let egui::Event::Key { modifiers, .. } = e { Some(*modifiers) } else { None })
+                                    .unwrap_or_default(),
+                            ));
+                            raw.events.extend(events);
+                        } else {
+                            self.solve.set_status("Open QP → Edit slots to assign a valid shortcut.", false);
+                        }
+                    }
+                }
+                _ => {
+                    if action == 21 {
+                        self.pen_transaction.cancel(&mut self.solve);
+                    } else {
+                        self.pen_transaction.complete(&mut self.solve);
+                    }
+                    tablet_input::panel_action(&mut self.solve, action);
+                    if action == 21 {
+                        cad::cancel_modeling();
+                        ctx.request_repaint();
+                    }
+                }
+            }
+        }
         self.ime.poll(raw);
         self.solve.raw_input_hook(raw);
     }
@@ -434,12 +469,11 @@ impl eframe::App for Shell {
         system_fonts::install_system_fonts(ui.ctx());
         self.keypad.show(ui);
         self.solve.ui(ui);
-        tablet_input::context_actions(&mut self.solve, ui.ctx());
         if !ui.input(|i| i.pointer.primary_down()) {
             self.pen_transaction.complete(&mut self.solve);
         }
         let scale = ui.ctx().pixels_per_point();
-        let regions = if self.solve.viewport.rect.is_some() && !ui.ctx().egui_wants_keyboard_input() {
+        let regions = if self.solve.viewport.rect.is_some() {
             self.dock.show(ui.ctx(), self.solve.session.active_sketch.is_some(), self.solve.dialog.is_some(), self.solve.viewport.boxsel.is_some())
         } else {
             Vec::new()
@@ -466,6 +500,9 @@ impl eframe::App for Shell {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if let Ok(settings) = serde_json::to_string(&self.dock) {
+            storage.set_string("android-cad-panel", settings);
+        }
         if let Ok(settings) = serde_json::to_string(&self.keypad) {
             storage.set_string("android-cad-keypad", settings);
         }
@@ -555,7 +592,7 @@ fn android_main(app: AndroidApp) {
             Ok(Box::new(Shell {
                 off_hand: Default::default(),
                 pen_transaction: tablet_input::Transaction::default(),
-                dock: tablet_input::Dock::default(),
+                dock: cc.storage.and_then(|s| s.get_string("android-cad-panel")).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
                 input_config: cad_config,
                 input_trace: "Input diagnostics: idle".into(),
                 keypad: cc.storage.and_then(|s| s.get_string("android-cad-keypad")).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
