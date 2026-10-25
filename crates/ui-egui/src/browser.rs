@@ -474,7 +474,7 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
 /// A Ctrl/Shift-aware click on a selectable row.
 fn click_select(app: &mut SolveApp, ui: &egui::Ui, key: String, sel: Option<Sel>) {
     let mods = ui.input(|i| i.modifiers);
-    if mods.shift
+    if (mods.shift || crate::tablet_input::action(crate::tablet_input::RANGE))
         && let Some(a) = app.tree.anchor.clone()
     {
         let order = app.tree.order.clone();
@@ -487,7 +487,7 @@ fn click_select(app: &mut SolveApp, ui: &egui::Ui, key: String, sel: Option<Sel>
     }
     app.tree.anchor = Some(key);
     let Some(sel) = sel else { return };
-    if mods.command || mods.ctrl {
+    if mods.command || mods.ctrl || crate::tablet_input::action(crate::tablet_input::ADD) {
         if app.session.selection.contains(&sel) {
             let rest: Vec<Sel> = app.session.selection.iter().filter(|x| **x != sel).cloned().collect();
             let _ = app.run("select.set", json!({ "items": rest }));

@@ -71,6 +71,8 @@
 //!    event loop (as shown above).
 
 use crate::event_loop::{ActiveEventLoop, EventLoop, EventLoopBuilder};
+#[path = "android_cad.rs"]
+pub mod cad;
 use crate::window::{Window, WindowAttributes};
 
 use self::activity::{AndroidApp, ConfigurationRef, Rect};

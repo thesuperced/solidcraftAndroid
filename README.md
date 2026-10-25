@@ -1,3 +1,11 @@
+## Download the Android tablet test APK
+
+[Download SolidCraft PenTouch Test APK — sketch corners and tablet controls (arm64, Android 9+)](https://github.com/thesuperced/solidcraftAndroid/raw/refs/heads/feat/android-pen-touch-keypad/artifacts/android/solidcraft-sketch-corners-arm64.apk)
+
+[Windows tablet updater](tools/android/update-tablet.ps1) · [New controls and tablet test steps](docs/android-sketch-corners-testing.md)
+
+Installs beside your original SolidCraft. [Build report, checksum and tablet testing details](artifacts/android/README.md).
+
 > **This is an Android fork.** Upstream is
 > [tangency-labs/solidcraft](https://github.com/tangency-labs/solidcraft); this fork adds a native
 > Android build for tablets (arm64, no browser/WebView) and the touch and pen input a tablet needs.

@@ -486,6 +486,19 @@ pub fn resolve(context: &[Scope], tool: Option<&ToolModifiers>, held: Held, trig
     for slot in best_group.into_iter().flatten() {
         set.insert(slot.1);
     }
+    use crate::tablet_input as tablet;
+    // The held tablet CTRL button uses the same selection-toggle semantics as physical Ctrl.
+    for (index, action, allowed) in [
+        (tablet::ADD, ModAction::SelectToggle, context.contains(&Scope::Selection)),
+        (tablet::NO_SNAP, ModAction::SuppressSnap, context.contains(&Scope::SketchDraw) || context.contains(&Scope::SketchDrag)),
+        (tablet::FREE, ModAction::FreeManipulatorDrag, true),
+        (tablet::MIDPOINT, ModAction::TargetMidpoint, context.contains(&Scope::SketchDraw) || context.contains(&Scope::SketchDrag)),
+        (tablet::RESELECT, ModAction::PreviewReselect, context.contains(&Scope::FeaturePreview)),
+    ] {
+        if allowed && tablet::action(index) && !(action == ModAction::SelectAdd && set.contains(ModAction::SelectToggle)) {
+            set.insert(action);
+        }
+    }
     set
 }
 

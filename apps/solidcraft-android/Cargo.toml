@@ -14,7 +14,9 @@ solidcraft-engine = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
+winit = { version = "0.30", default-features = false, features = ["android-native-activity"] }
 serde_json = { workspace = true }
+serde = { workspace = true }
 jni = "0.22"
 getrandom = "0.3"
 # The agent chat's API agents: HTTPS to an OpenAI-compatible endpoint (ring: the crypto provider
@@ -33,8 +35,8 @@ android-activity = { version = "0.6", default-features = false, features = ["nat
 android_logger = "0.14"
 
 [package.metadata.android]
-package = "ai.storyteller.solidcraft"
-apk_name = "solidcraft"
+package = "ai.storyteller.solidcraft.pentouch"
+apk_name = "solidcraft-pentouch-test"
 build_targets = ["aarch64-linux-android"]
 resources = "res"
 java_sources = "java"
@@ -61,15 +63,15 @@ name = "android.permission.WRITE_EXTERNAL_STORAGE"
 max_sdk_version = 29
 
 [package.metadata.android.application]
-label = "SolidCraft"
+label = "SolidCraft PenTouch Test"
 theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
 icon = "@mipmap/ic_launcher"
 
 # cargo-apk2 adds no activity on its own: without this table the APK has no entry point at all
 # (no launcher icon, nothing to start).
 [[package.metadata.android.application.activity]]
-name = ".SolidCraftActivity"
-label = "SolidCraft"
+name = "ai.storyteller.solidcraft.SolidCraftActivity"
+label = "SolidCraft PenTouch Test"
 launch_mode = "singleTask"
 orientation = "sensor"
 exported = true
@@ -81,6 +83,5 @@ intent_filter = [{ actions = ["android.intent.action.MAIN"], categories = ["andr
 name = "android.app.lib_name"
 value = "solidcraft_android"
 
-[package.metadata.android.signing.release]
-path = "../../keys/solidcraft.jks"
-keystore_password = "8bfd4d32a8759a955cea85c67522f791"
+# Test builds use cargo-apk2's local debug key. Supply release signing externally;
+# never commit a keystore or password here.

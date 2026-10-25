@@ -667,6 +667,64 @@ fn picked_point(session: &solidcraft_engine::Session, inputs: &[SelInput], i: us
 /// The command a sketch modify dialog makes. Scale, Move, and patterns send evaluated
 /// numbers. Offset and Fillet retain expressions in persistent driving dimensions.
 pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
+    if let Mod::Corner { chamfer, ctype, size, distance2, angle, flip } = k {
+        let points = corner_ids(app, inputs, 0);
+        let lines = line_ids(inputs, 0);
+        if lines.len() > 2 || (!points.is_empty() && !lines.is_empty()) || (*chamfer && points.len() > 1) {
+            let mut refs: Vec<Value> = points
+                .iter()
+                .map(|point| if *chamfer { corner_ref(app, point, *flip && *ctype > 0) } else { Ok(json!({"point":point})) })
+                .collect::<Result<_, String>>()?;
+            let st = app.session.world_state();
+            let sk = &st.sketch(app.session.active_sketch.ok_or("open a sketch first")?).ok_or("sketch is missing")?.sketch;
+            for (pi, point) in sk.points.iter().enumerate() {
+                let Some((a, b)) = crate::sketch_tools::corner_curves(sk, pi, !*chamfer) else { continue };
+                let (Some(a), Some(b)) = (sk.curves.get(a), sk.curves.get(b)) else { continue };
+                if !lines.contains(&a.id) || !lines.contains(&b.id) || points.contains(&point.id) {
+                    continue;
+                }
+                // Ignore tangent/collinear joins; those are not corners to cut or round.
+                let Some((a0, a1)) = a.kind.ends() else { continue };
+                let Some((b0, b1)) = b.kind.ends() else { continue };
+                let Some(pa) = sk.point(if a0 == pi { a1 } else { a0 }) else { continue };
+                let Some(pb) = sk.point(if b0 == pi { b1 } else { b0 }) else { continue };
+                if (pa - point.pos).cross(pb - point.pos).abs() <= 1e-9 {
+                    continue;
+                }
+                refs.push(if *chamfer && *flip && *ctype > 0 { json!({"a":b.id,"b":a.id}) } else { json!({"a":a.id,"b":b.id}) });
+            }
+            if refs.is_empty() {
+                return Err("Select lines sharing eligible corners, or select corner points.".into());
+            }
+            if refs.len() > 500 {
+                return Err("Select at most 500 corners.".into());
+            }
+            let mut p = json!({"corners":refs});
+            let id = if !*chamfer {
+                p["radius"] = json!(app.session.doc.with_design_unit(size.trim(), ValueKind::Length));
+                "sketch.fillet"
+            } else {
+                p["distance"] = json!(corner_size(app, "Distance", size, ValueKind::Length)?);
+                match *ctype {
+                    1 => {
+                        p["distance2"] = json!(corner_size(app, "Distance 2", distance2, ValueKind::Length)?);
+                        "sketch.chamfer.two_distance"
+                    }
+                    2 => {
+                        p["angle"] = json!(corner_size(app, "Angle", angle, ValueKind::Angle)?.to_degrees());
+                        "sketch.chamfer.distance_angle"
+                    }
+                    _ => "sketch.chamfer.equal_distance",
+                }
+            };
+            if let Some(object) = p.as_object_mut() {
+                for (key, value) in extra {
+                    object.entry(key.clone()).or_insert_with(|| value.clone());
+                }
+            }
+            return Ok(vec![(id.into(), p)]);
+        }
+    }
     if inputs.iter().flat_map(|input| &input.items).any(|sel| matches!(sel, Sel::SketchPoint { .. }) && point_id(&app.session, sel).is_none()) {
         return Err("Select points of the sketch being edited".into());
     }

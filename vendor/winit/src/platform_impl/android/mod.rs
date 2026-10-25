@@ -6,10 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use android_activity::input::{InputEvent, KeyAction, Keycode, MotionAction, ToolType};
-
-/// True while the stylus (S Pen) is touching the glass, so the palm resting on it is ignored.
-static STYLUS_DOWN: AtomicBool = AtomicBool::new(false);
+use android_activity::input::{InputEvent, KeyAction, Keycode, MotionAction};
 use android_activity::{
     AndroidApp, AndroidAppWaker, ConfigurationRef, InputStatus, MainEvent, Rect,
 };
@@ -236,6 +233,7 @@ impl<T: 'static> EventLoop<T> {
                     );
                 },
                 MainEvent::LostFocus => {
+                    crate::platform::android::cad::reset();
                     HAS_FOCUS.store(false, Ordering::Relaxed);
                     callback(
                         event::Event::WindowEvent {
@@ -282,6 +280,7 @@ impl<T: 'static> EventLoop<T> {
                     warn!("TODO: forward saveState notification to application");
                 },
                 MainEvent::Pause => {
+                    crate::platform::android::cad::reset();
                     debug!("App Paused - stopped running");
                     self.running = false;
                 },
@@ -384,10 +383,19 @@ impl<T: 'static> EventLoop<T> {
                 // pointer move, so the viewport can show what a tap would pick before it lands.
                 // A stylus hovering or leaving is not drawing: never leave the flag set, or every
                 // finger afterwards is mistaken for a palm and dropped.
-                if matches!(motion_event.action(), MotionAction::HoverMove | MotionAction::HoverEnter) {
+                if matches!(motion_event.action(), MotionAction::HoverMove | MotionAction::HoverEnter | MotionAction::HoverExit) {
                     if let Some(pointer) = motion_event.pointers().next() {
-                        if pointer.tool_type() == ToolType::Stylus {
-                            STYLUS_DOWN.store(false, Ordering::Relaxed);
+                        use crate::platform::android::cad::{self, Contact, Phase, Source};
+                        use android_activity::input::{Axis, ToolType};
+                        cad::route(Contact { device: motion_event.device_id(), id: pointer.pointer_id(),
+                            source: match pointer.tool_type() { ToolType::Stylus => Source::Stylus, ToolType::Eraser => Source::Eraser, ToolType::Mouse => Source::Mouse, _ => Source::Unknown },
+                            phase: if motion_event.action() == MotionAction::HoverExit { Phase::Leave } else { Phase::Hover },
+                            position: [pointer.x(), pointer.y()], pressure: pointer.pressure(),
+                            tilt: pointer.axis_value(Axis::Tilt), orientation: pointer.orientation(),
+                            time_ns: motion_event.event_time(), buttons: motion_event.button_state().0, historical: false });
+                        if motion_event.action() == MotionAction::HoverExit {
+                            callback(event::Event::WindowEvent { window_id, event: event::WindowEvent::CursorLeft { device_id } }, self.window_target());
+                            return InputStatus::Handled;
                         }
                         let position = PhysicalPosition { x: pointer.x() as _, y: pointer.y() as _ };
                         callback(
@@ -401,21 +409,11 @@ impl<T: 'static> EventLoop<T> {
                     return InputStatus::Handled;
                 }
 
-                // A palm resting on the glass while the pen draws must not become a second finger
-                // (which would read as a pinch): ignore finger input until the pen lifts.
-                if matches!(motion_event.pointer_at_index(motion_event.pointer_index()).tool_type(), ToolType::Stylus) {
-                    match motion_event.action() {
-                        MotionAction::Down | MotionAction::PointerDown | MotionAction::Move => {
-                            STYLUS_DOWN.store(true, Ordering::Relaxed);
-                        }
-                        MotionAction::Up | MotionAction::PointerUp | MotionAction::Cancel => {
-                            STYLUS_DOWN.store(false, Ordering::Relaxed);
-                        }
-                        _ => {}
-                    }
-                } else if STYLUS_DOWN.load(Ordering::Relaxed) {
-                    return InputStatus::Handled;
-                }
+                // Do not globally suppress fingers while a stylus is down. Android reports the
+                // tool type per pointer, and the UI needs both streams for pen drawing plus
+                // finger camera navigation. Cancellation is forwarded below so the receiver can
+                // clear only the affected contact. A future typed side-channel can use the same
+                // per-pointer records without changing this event's stable pointer id.
 
                 let phase = match motion_event.action() {
                     MotionAction::Down | MotionAction::PointerDown => {
@@ -435,20 +433,78 @@ impl<T: 'static> EventLoop<T> {
                             // as `PointerDown` and its index has been unreliable on some panels, so
                             // report them all and let the app ignore an id it already tracks. A
                             // lost second start is a pinch that never happens.
-                            event::TouchPhase::Started | event::TouchPhase::Moved | event::TouchPhase::Cancelled => {
+                            event::TouchPhase::Moved | event::TouchPhase::Cancelled => {
                                 Box::new(motion_event.pointers())
                             }
-                            event::TouchPhase::Ended => Box::new(std::iter::once(
+                            event::TouchPhase::Started | event::TouchPhase::Ended => Box::new(std::iter::once(
                                 motion_event.pointer_at_index(motion_event.pointer_index()),
                             )),
                         };
 
+                    let mut navigation_changed = false;
                     for pointer in pointers {
                         let location =
                             PhysicalPosition { x: pointer.x() as _, y: pointer.y() as _ };
+                        use crate::platform::android::cad::{self, Contact, Phase, Source};
+                        use android_activity::input::ToolType;
+                        let source = match pointer.tool_type() {
+                            ToolType::Finger => Source::Finger,
+                            ToolType::Stylus => Source::Stylus,
+                            ToolType::Eraser => Source::Eraser,
+                            ToolType::Mouse => Source::Mouse,
+                            _ => Source::Unknown,
+                        };
+                        let canceled = motion_event.flags().0 & 0x20 != 0;
+                        let phase = if canceled { event::TouchPhase::Cancelled } else { phase };
+                        let contact = Contact {
+                            device: motion_event.device_id(), id: pointer.pointer_id(), source,
+                            phase: match phase {
+                                event::TouchPhase::Started => Phase::Down,
+                                event::TouchPhase::Moved => Phase::Move,
+                                event::TouchPhase::Ended => Phase::Up,
+                                event::TouchPhase::Cancelled => Phase::Cancel,
+                            },
+                            position: [pointer.x(), pointer.y()], pressure: pointer.pressure(),
+                            time_ns: motion_event.event_time(), buttons: motion_event.button_state().0,
+                            tilt: pointer.axis_value(android_activity::input::Axis::Tilt), orientation: pointer.orientation(), historical: false,
+                        };
+                        if phase == event::TouchPhase::Moved && matches!(source, Source::Stylus | Source::Eraser) {
+                            for sample in pointer.history().take(256) {
+                                cad::route(Contact { position: [sample.x(), sample.y()], pressure: sample.pressure(),
+                                    tilt: sample.axis_value(android_activity::input::Axis::Tilt), orientation: sample.orientation(),
+                                    time_ns: sample.event_time(), historical: true, ..contact });
+                            }
+                        }
+                        trace!("CAD contact: {contact:?}");
+                        if cad::route(contact) {
+                            navigation_changed = true;
+                            continue;
+                        }
+                        // Pen contacts are pointer events, never members of egui multi-touch.
+                        if matches!(source, Source::Stylus | Source::Eraser) {
+                            if phase == event::TouchPhase::Cancelled { cad::cancel_pen(); }
+                            callback(event::Event::WindowEvent { window_id,
+                                event: event::WindowEvent::CursorMoved { device_id, position: location }
+                            }, self.window_target());
+                            let state = match phase {
+                                event::TouchPhase::Started => Some(event::ElementState::Pressed),
+                                event::TouchPhase::Ended | event::TouchPhase::Cancelled => Some(event::ElementState::Released),
+                                _ => None,
+                            };
+                            if let Some(state) = state {
+                                callback(event::Event::WindowEvent { window_id,
+                                    event: event::WindowEvent::MouseInput { device_id, state, button: event::MouseButton::Left }
+                                }, self.window_target());
+                            }
+                            continue;
+                        }
                         trace!(
-                            "Input event {device_id:?}, {phase:?}, loc={location:?}, \
-                             pointer={pointer:?}"
+                            "Input event {device_id:?}, {phase:?}, tool={:?}, loc={location:?}, \
+                             pointer_id={}, canceled={}, pressure={:.3}",
+                            pointer.tool_type(),
+                            pointer.pointer_id(),
+                            phase == event::TouchPhase::Cancelled,
+                            pointer.pressure()
                         );
                         let event = event::Event::WindowEvent {
                             window_id,
@@ -461,6 +517,17 @@ impl<T: 'static> EventLoop<T> {
                             }),
                         };
                         callback(event, self.window_target());
+                    }
+                    if navigation_changed {
+                        // One Android motion can carry every finger. Wake one frame for the batch,
+                        // rather than enqueuing a redraw for each pointer.
+                        callback(
+                            event::Event::WindowEvent {
+                                window_id,
+                                event: event::WindowEvent::RedrawRequested,
+                            },
+                            self.window_target(),
+                        );
                     }
                 }
             },
@@ -958,6 +1025,7 @@ impl Window {
     pub fn set_ime_cursor_area(&self, _position: Position, _size: Size) {}
 
     pub fn set_ime_allowed(&self, allowed: bool) {
+        if allowed && crate::platform::android::cad::suppress_automatic_ime() { return; }
         if allowed {
             self.app.show_soft_input(true);
         } else {

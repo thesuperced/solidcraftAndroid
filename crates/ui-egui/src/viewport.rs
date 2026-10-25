@@ -45,6 +45,8 @@ pub enum NavMode {
 
 #[derive(Default)]
 pub struct ViewportState {
+    tablet_press: Option<(Pos2, f64)>,
+    tablet_box_armed: bool,
     /// The arrow turning the view that is still down (`navigation::step_key_hold`).
     pub(crate) key_hold: Option<crate::navigation::KeyHold>,
     /// A two-point drawing tool's first point was placed by a press (here) that became a drag:
@@ -102,8 +104,7 @@ pub struct ViewportState {
     pub primary_nav: Option<NavMode>,
     /// Fingers on the screen this frame (touch screens): one finger orbits, two pan and pinch.
     pub touch: Vec<(egui::TouchId, Pos2)>,
-    /// The two-finger gesture's centre and finger spread last frame, for pan and pinch.
-    pub(crate) touch_centroid: Option<Pos2>,
+    /// The two-finger gesture's spread last frame, for pinch on other platforms.
     pub(crate) touch_span: Option<f32>,
     /// Where the lone finger of this gesture landed. One finger only orbits once it has moved past
     /// a small dead zone, so a pinch's second finger can land before the first one turns the view.
@@ -1793,6 +1794,10 @@ pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
 
 /// What the selection filter lets a click pick with no dialog.
 fn pick_allowed(app: &SolveApp, h: &Hit) -> bool {
+    let tablet = crate::tablet_input::policy();
+    if tablet.enabled && !tablet.filter.accepts(h) {
+        return false;
+    }
     let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
     match h {
         Hit::SketchCurve { .. } => !off("sketch") && !off("sketch_curves"),
@@ -1814,7 +1819,12 @@ fn hit_candidate(app: &SolveApp, h: &Hit) -> Option<(Hit, Sel)> {
         Hit::SketchPoint { sketch, id, .. } if app.session.active_sketch != Some(*sketch) => {
             Some((h.clone(), Sel::ExternalSketchPoint { sketch: *sketch, id: id.clone() }))
         }
-        Hit::Face { body, .. } if app.ui.pick_bodies => Some((h.clone(), Sel::Body { name: body.clone() })),
+        Hit::Face { body, .. }
+            if app.ui.pick_bodies
+                || (crate::tablet_input::policy().enabled && crate::tablet_input::policy().filter == crate::tablet_input::Filter::Bodies) =>
+        {
+            Some((h.clone(), Sel::Body { name: body.clone() }))
+        }
         _ => hit_sel(h).map(|s| (h.clone(), s)),
     }
 }
@@ -2137,7 +2147,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     for pts in &crate::sketch_display::curve_sample(app, *sketch, ci, &ss.plane, &display_proj(app)).parts {
                         let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
                         for (a, b) in sketch_segments(pts, mode, grid_step(app.cam.half_height()).0) {
-                            feedback.line(a.to_f32(), b.to_f32(), c4(t.sel_edge), 3.5, true);
+                            feedback.line(a.to_f32(), b.to_f32(), c4(t.warning), 4.5, true);
                         }
                     }
                 }
@@ -2147,7 +2157,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 for ss in st.sketches.iter() {
                     if let Some(w) = ss.sketch.wire_index(id).and_then(|i| ss.sketch.wires.get(i)) {
                         for q in w.pts.windows(2) {
-                            feedback.line(q[0].to_f32(), q[1].to_f32(), c4(t.sel_edge), 3.5, true);
+                            feedback.line(q[0].to_f32(), q[1].to_f32(), c4(t.warning), 4.5, true);
                         }
                     }
                 }
@@ -2159,7 +2169,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     for pts in &crate::sketch_display::curve_sample(app, ss.feature, ci, &ss.plane, &display_proj(app)).parts {
                         let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
                         for (a, b) in sketch_segments(pts, mode, grid_step(app.cam.half_height()).0) {
-                            feedback.line(a.to_f32(), b.to_f32(), c4(t.sel_edge), 3.5, true);
+                            feedback.line(a.to_f32(), b.to_f32(), c4(t.warning), 4.5, true);
                         }
                     }
                 }
@@ -2455,6 +2465,23 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         candidate(app, &hits).map(|(h, s)| (h, Some(s)))
     };
     app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
+    if crate::tablet_input::pen() {
+        let now = ui.input(|i| i.time);
+        let policy = crate::tablet_input::policy();
+        if primary_pressed {
+            app.viewport.tablet_box_armed = false;
+            app.viewport.tablet_press = hover.filter(|_| inside && cand.is_none() && app.tool.is_none() && app.dialog.is_none()).map(|p| (p, now));
+        }
+        if let Some((origin, start)) = app.viewport.tablet_press {
+            if primary_down && now - start >= policy.hold_seconds {
+                app.viewport.tablet_box_armed = true;
+            } else if primary_down && hover.is_some_and(|p| p.distance(origin) > policy.slop) {
+                app.viewport.tablet_press = None;
+            } else if primary_down {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
+            }
+        }
+    }
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up.
     let held =
@@ -2648,7 +2675,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !held
             && app.dialog.is_none()
             && crate::dim_view::pick_reference(ui.ctx(), p, resp.double_clicked());
-        if resp.clicked() && !held && !reference_pick {
+        let pen_idle = crate::tablet_input::pen() && app.tool.is_none() && app.dialog.is_none();
+        let pen_body = pen_idle && resp.double_clicked() && matches!(app.viewport.hover, Some(Hit::Face { .. }));
+        let pen_dimension = pen_idle
+            && resp.clicked()
+            && crate::dim_view::hit_text(p).is_some()
+            && !crate::dim_view::editing()
+            && crate::dim_view::double_click(app, p);
+        if pen_body && !held {
+            if let Some(Hit::Face { body, .. }) = app.viewport.hover.clone() {
+                let items = crate::selection::promote_body(&app.session.selection, &body);
+                let _ = app.run("select.set", json!({ "items": items }));
+            }
+        }
+        if resp.clicked() && !held && !reference_pick && !pen_body && !pen_dimension {
             if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p, mods.shift);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
@@ -2682,10 +2722,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         Some(id) => select(app, Some(Sel::SketchConstraint { id }), add, allow_toggle),
                         // Clicking again on the same spot selects the next thing under it (not
                         // the second click of a double-click, which has its own actions).
-                        None if !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
+                        None if !pen_idle && !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
                         None => {
                             let sel = cand.and_then(|c| c.1);
-                            select(app, sel.clone(), add, allow_toggle);
+                            select(app, sel.clone(), add || (pen_idle && sel.is_some()), allow_toggle || pen_idle);
                             crate::select_other::note_click(app, p, if add { None } else { sel });
                         }
                     }
@@ -2693,12 +2733,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
         // Double-click a dimension: edit its value in place.
-        let dim_edit = resp.double_clicked()
-            && !held
-            && !crate::dim_view::editing()
-            && app.tool.is_none()
-            && app.dialog.is_none()
-            && (crate::sketch_modify_ui::double_click_pattern(app, p) || crate::dim_view::double_click(app, p));
+        let dim_edit = pen_dimension
+            || resp.double_clicked()
+                && !held
+                && !crate::dim_view::editing()
+                && app.tool.is_none()
+                && app.dialog.is_none()
+                && (crate::sketch_modify_ui::double_click_pattern(app, p) || crate::dim_view::double_click(app, p));
         // Double-click a text (an outline or inside a letter; the first click selected it): edit it.
         if resp.double_clicked()
             && !held
@@ -2945,6 +2986,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         let origin = ui.input(|i| i.pointer.press_origin());
         if resp.dragged_by(egui::PointerButton::Primary)
+            && (!crate::tablet_input::pen() || app.viewport.tablet_box_armed)
             && let (Some(a), Some(b)) = (origin, hover)
             && rect.contains(a)
             && !crate::shell::covered(app, a)
@@ -2964,6 +3006,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     } else {
         app.viewport.boxsel = None;
+    }
+    if !primary_down {
+        app.viewport.tablet_press = None;
+        app.viewport.tablet_box_armed = false;
     }
     crate::preview::paint_sketches(app, &painter, &proj);
     crate::ref_images::show(app, ui, &painter, &proj);
@@ -3015,6 +3061,15 @@ fn paint_box_selection(painter: &egui::Painter, bx: BoxSel, sketch: bool) {
         t.box_window
     };
     painter.rect_filled(bx.rect, 0.0, col.gamma_multiply(0.12));
+    if crate::tablet_input::policy().enabled {
+        painter.text(
+            bx.rect.left_bottom() + vec2(0.0, 8.0),
+            Align2::LEFT_TOP,
+            format!("{} · {}", crate::tablet_input::policy().filter.label(), if bx.crossing { "Crossing" } else { "Enclosed" }),
+            FontId::proportional(t.font_body),
+            col,
+        );
+    }
     if bx.crossing {
         let c = [bx.rect.left_top(), bx.rect.right_top(), bx.rect.right_bottom(), bx.rect.left_bottom()];
         for i in 0..4 {
@@ -3131,6 +3186,7 @@ fn paint_toast(ui: &egui::Ui, free: Rect, text: String, error: bool, computing: 
 /// When `add` is true but `toggle` is false (Shift add-only preference), picked items
 /// are only added.
 pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bool) {
+    let (add, toggle) = if crate::tablet_input::pen() && app.tool.is_none() && app.dialog.is_none() { (sel.is_some(), true) } else { (add, toggle) };
     if !add {
         // A joint picked in the browser (highlighted even when hidden) lets go.
         app.tree.picked_joints.clear();
@@ -3281,7 +3337,9 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     let to2 = |pts: &[Vec3]| -> Vec<Pos2> { pts.iter().filter_map(|p| proj.to_screen(*p)).collect() };
     let sketch_dialog = app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_)));
     let accepts = app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept);
+    let tablet = crate::tablet_input::policy();
     if (app.dialog.is_none() || sketch_dialog)
+        && (!tablet.enabled || matches!(tablet.filter, crate::tablet_input::Filter::All | crate::tablet_input::Filter::Sketch))
         && let Some(ss) = app.session.active_sketch.and_then(|sid| st.sketch(sid))
     {
         // What the selection filter lets through (window: wholly inside; crossing: touching).
@@ -3337,13 +3395,27 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             }
         }
     } else {
-        let accept = app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).unwrap_or(BODIES);
+        let tablet_accept = match tablet.filter {
+            crate::tablet_input::Filter::Faces => FACES,
+            crate::tablet_input::Filter::Edges => EDGES,
+            crate::tablet_input::Filter::Vertices => crate::selection::VERTICES,
+            crate::tablet_input::Filter::Sketch => PROFILES,
+            _ => BODIES,
+        };
+        let accept =
+            app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).unwrap_or(if tablet.enabled { tablet_accept } else { BODIES });
         for b in &st.bodies {
             if !app.session.body_visible(&b.name) {
                 continue;
             }
             let m = b.mesh();
-            if accept & EDGES != 0 {
+            if accept & crate::selection::VERTICES != 0 {
+                for point in m.edges.iter().flat_map(|edge| [edge.first(), edge.last()].into_iter().flatten()) {
+                    if bx.takes(&to2(&[*point])) {
+                        out.push(Sel::Vertex { body: b.name.clone(), point: *point });
+                    }
+                }
+            } else if accept & EDGES != 0 {
                 for (ei, e) in m.edges.iter().enumerate() {
                     let rim = m.circular_rim(ei);
                     let takes = if bx.crossing { bx.takes(&to2(e)) } else { rim.iter().all(|&i| m.edges.get(i).is_some_and(|p| bx.takes(&to2(p)))) };

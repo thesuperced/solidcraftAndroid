@@ -57,6 +57,11 @@ import java.util.concurrent.Executors;
  * hand-edit it in the app checkout. Put persistent customizations in an adapter under adapters/.
  */
 public final class SolidCraftActivity extends NativeActivity {
+    public int cadInputConfig(int item) {
+        if (item == 0) return android.view.ViewConfiguration.get(this).getScaledTouchSlop();
+        if (item == 1) return android.view.ViewConfiguration.getLongPressTimeout();
+        return android.view.ViewConfiguration.getDoubleTapTimeout();
+    }
     private static final String TAG = "SolidCraftSAF";
     private static final int REQ_OPEN = 0x5043;
     private static final int REQ_SAVE = 0x5044;
@@ -319,6 +324,9 @@ public final class SolidCraftActivity extends NativeActivity {
             imeView.setTextColor(0);
             imeView.setAlpha(0.01f);
             imeView.setSoundEffectsEnabled(false);
+            // SolidCraft supplies its own CAD keypad. Keep the system IME opt-in so focusing an
+            // egui TextEdit never unexpectedly resizes or covers the viewport.
+            imeView.setShowSoftInputOnFocus(false);
             imeView.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
             imeView.setImeOptions(EditorInfo.IME_FLAG_NO_FULLSCREEN);
             imeView.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);

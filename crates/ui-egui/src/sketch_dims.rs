@@ -456,6 +456,19 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             state.store(ui.ctx(), id);
         }
         ui.ctx().memory_mut(|memory| memory.request_focus(id));
+    } else if source.is_none() && tab.is_some() && crate::tablet_input::policy().enabled && t.cmd == "sketch.line" {
+        // Experimental tablet TAB: enter Length from the canvas, then use the shared
+        // dimension traversal above to alternate Length and Angle.
+        let id = egui::Id::new(("sc_dim", 0_usize));
+        if let Some(dimension) = t.dims.first() {
+            let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(dimension.value.chars().count()),
+            )));
+            state.store(ui.ctx(), id);
+        }
+        ui.ctx().memory_mut(|memory| memory.request_focus(id));
     }
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
     let nothing = ui.ctx().memory(|m| m.focused().is_none());

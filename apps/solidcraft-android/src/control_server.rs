@@ -88,7 +88,9 @@ fn listen(port: u16, token: String, tx: Sender<ControlRequest>, ctx: egui::Conte
             ),
         },
         None => {
-            log::error!("solidcraft: control server listening on 127.0.0.1:{port}; no data folder for its token, clients need SOLIDCRAFT_CONTROL_TOKEN")
+            log::error!(
+                "solidcraft: control server listening on 127.0.0.1:{port}; no data folder for its token, clients need SOLIDCRAFT_CONTROL_TOKEN"
+            )
         }
     }
     let token = std::sync::Arc::new(token);
@@ -223,7 +225,15 @@ fn serve_with(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: e
                     Err(TryRecvError::Disconnected) => Some(json!({"ok": false, "error": "the app ended the request without a reply"})),
                     Err(TryRecvError::Empty) => None,
                 });
-                let mut r = if method == "control.pending" {
+                let mut r = if method == "android.input" {
+                    match crate::cad::diagnostics() {
+                        Some(s) => {
+                            json!({"ok":true,"result":{"owners":s.owners.iter().map(|(device,id,owner)| json!({"device":device,"id":id,"owner":format!("{owner:?}")})).collect::<Vec<_>>(),
+                            "viewport":s.region,"controls":s.controls.iter().map(|(id,rect)| json!({"id":id,"rect":rect})).collect::<Vec<_>>(),"events":s.events,"canceled":s.canceled,"historical":s.historical}})
+                        }
+                        None => json!({"ok":false,"error":"input router unavailable"}),
+                    }
+                } else if method == "control.pending" {
                     match (pending.take(), late) {
                         (None, _) => json!({"ok": true, "result": {"pending": null}}),
                         (Some(p), Some(reply)) => json!({"ok": true, "result": {"pending": p.id, "method": p.method, "done": true, "reply": reply}}),
